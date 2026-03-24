@@ -1,50 +1,96 @@
-# [PROJECT_NAME] Constitution
-<!-- Example: Spec Constitution, TaskFlow Constitution, etc. -->
+<!--
+SYNC IMPACT REPORT
+==================
+Version change  : (none) → 1.0.0
+Type of bump    : MAJOR — initial ratification (all placeholders filled)
+Modified        : N/A (initial creation)
+Added sections  : Core Principles, Technology & Tooling, Development Workflow, Governance
+Removed sections: N/A
+Templates reviewed:
+  ✅ .specify/memory/constitution.md       — this file (created)
+  ✅ .specify/templates/plan-template.md   — no changes required; language-agnostic
+  ✅ .specify/templates/spec-template.md   — no changes required
+  ✅ .specify/templates/tasks-template.md  — no changes required
+Deferred TODOs  : None
+-->
+
+# path_generation Constitution
 
 ## Core Principles
 
-### [PRINCIPLE_1_NAME]
-<!-- Example: I. Library-First -->
-[PRINCIPLE_1_DESCRIPTION]
-<!-- Example: Every feature starts as a standalone library; Libraries must be self-contained, independently testable, documented; Clear purpose required - no organizational-only libraries -->
+### I. Rust-First
 
-### [PRINCIPLE_2_NAME]
-<!-- Example: II. CLI Interface -->
-[PRINCIPLE_2_DESCRIPTION]
-<!-- Example: Every library exposes functionality via CLI; Text in/out protocol: stdin/args → stdout, errors → stderr; Support JSON + human-readable formats -->
+All production source code MUST be written in Rust (stable channel).
+No other systems-programming language may be introduced without a formal constitution amendment.
+`unsafe` blocks are permitted only when safe alternatives are genuinely unavailable; each
+occurrence MUST include an inline comment that explains why safety cannot be upheld by safe
+Rust and MUST receive explicit approval during code review.
 
-### [PRINCIPLE_3_NAME]
-<!-- Example: III. Test-First (NON-NEGOTIABLE) -->
-[PRINCIPLE_3_DESCRIPTION]
-<!-- Example: TDD mandatory: Tests written → User approved → Tests fail → Then implement; Red-Green-Refactor cycle strictly enforced -->
+### II. Safety & Correctness
 
-### [PRINCIPLE_4_NAME]
-<!-- Example: IV. Integration Testing -->
-[PRINCIPLE_4_DESCRIPTION]
-<!-- Example: Focus areas requiring integration tests: New library contract tests, Contract changes, Inter-service communication, Shared schemas -->
+Rust's ownership model and type system are the primary correctness mechanism and MUST be
+used to their full extent.
+Library code MUST NOT panic; all fallible operations MUST return `Result<T, E>` or `Option<T>`.
+`clippy` warnings are treated as errors in CI (`-D warnings`).
+`rustfmt` formatting MUST be applied before every commit; violations block CI.
 
-### [PRINCIPLE_5_NAME]
-<!-- Example: V. Observability, VI. Versioning & Breaking Changes, VII. Simplicity -->
-[PRINCIPLE_5_DESCRIPTION]
-<!-- Example: Text I/O ensures debuggability; Structured logging required; Or: MAJOR.MINOR.BUILD format; Or: Start simple, YAGNI principles -->
+### III. Test-First (NON-NEGOTIABLE)
 
-## [SECTION_2_NAME]
-<!-- Example: Additional Constraints, Security Requirements, Performance Standards, etc. -->
+TDD is mandatory: tests MUST be written and approved before implementation begins.
+The Red-Green-Refactor cycle is strictly enforced.
+`cargo test` MUST pass on all commits; un-tested code MUST NOT be merged to the main branch.
+Integration tests MUST cover inter-module contracts whenever a public API is introduced or
+changed.
 
-[SECTION_2_CONTENT]
-<!-- Example: Technology stack requirements, compliance standards, deployment policies, etc. -->
+### IV. Performance-Aware Design
 
-## [SECTION_3_NAME]
-<!-- Example: Development Workflow, Review Process, Quality Gates, etc. -->
+Path generation operations MUST be analyzed for algorithmic complexity before implementation.
+`cargo bench` benchmarks MUST accompany any change to a performance-critical code path.
+Unnecessary heap allocations MUST be avoided; prefer stack-allocated types and iterators.
+Performance regressions detected by benchmarks MUST be addressed before a PR is merged.
 
-[SECTION_3_CONTENT]
-<!-- Example: Code review requirements, testing gates, deployment approval process, etc. -->
+### V. Simplicity & Minimal Dependencies
+
+YAGNI: implement only what is required by the current specification.
+Every crate added to `Cargo.toml` MUST be justified in the PR description; prefer standard
+library solutions over third-party alternatives wherever practical.
+Transitive dependency security audits MUST be performed via `cargo audit` in CI.
+Complexity MUST be justified by explicit requirements, not anticipated future needs.
+
+## Technology & Tooling
+
+All development MUST use the following toolchain and conventions:
+
+- **Language**: Rust (stable channel); MSRV MUST be declared via `rust-version` in `Cargo.toml`.
+- **Build System**: Cargo; a workspace layout MUST be adopted if the project grows beyond one crate.
+- **Formatting**: `rustfmt` with a project-level `rustfmt.toml`; enforced in CI via
+  `cargo fmt -- --check`.
+- **Linting**: `cargo clippy -- -D warnings`; all warnings are treated as errors in CI.
+- **Testing**: `cargo test` for unit and integration tests; `cargo bench` for benchmarks.
+- **Security Audit**: `cargo audit` MUST run in CI; known vulnerabilities block merges.
+- **Documentation**: All public APIs MUST have `///` doc comments; `cargo doc` MUST build
+  without warnings.
+
+## Development Workflow
+
+- All work MUST be done on feature branches; the main branch MUST remain releasable at all times.
+- CI MUST enforce: `cargo fmt --check`, `cargo clippy -- -D warnings`, `cargo test`,
+  `cargo audit`.
+- Every pull request requires at least one code-review approval; changes to public APIs require
+  an additional constitution sync check before merge.
+- Commit messages MUST follow Conventional Commits (`feat:`, `fix:`, `docs:`, `chore:`, etc.).
+- Releases MUST follow Semantic Versioning (SemVer); `CHANGELOG.md` MUST be updated on each
+  release.
 
 ## Governance
-<!-- Example: Constitution supersedes all other practices; Amendments require documentation, approval, migration plan -->
 
-[GOVERNANCE_RULES]
-<!-- Example: All PRs/reviews must verify compliance; Complexity must be justified; Use [GUIDANCE_FILE] for runtime development guidance -->
+This constitution is the highest-authority document for the `path_generation` project.
+All development practices, tooling decisions, and architectural choices MUST comply with it.
+Amendments require a pull request targeting `.specify/memory/constitution.md` with a documented
+rationale; the version line MUST be bumped according to the semantic versioning rules defined
+in the `speckit.constitution` agent (MAJOR for governance/principle removals or redefinitions,
+MINOR for new sections or materially expanded guidance, PATCH for clarifications and wording
+fixes).
+All PRs and code reviews MUST explicitly verify compliance with this constitution.
 
-**Version**: [CONSTITUTION_VERSION] | **Ratified**: [RATIFICATION_DATE] | **Last Amended**: [LAST_AMENDED_DATE]
-<!-- Example: Version: 2.1.1 | Ratified: 2025-06-13 | Last Amended: 2025-07-16 -->
+**Version**: 1.0.0 | **Ratified**: 2026-03-24 | **Last Amended**: 2026-03-24

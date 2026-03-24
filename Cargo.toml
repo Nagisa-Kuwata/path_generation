@@ -1,0 +1,23 @@
+[package]
+name = "path_generation"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+
+[[bench]]
+name = "lrf_bench"
+harness = false
+
+[[bench]]
+name = "planner_bench"
+harness = false
+
+[dependencies]
+egui = "0.31"
+eframe = { version = "0.31", features = ["default_fonts"] }
+rand = "0.8"
+rand_chacha = "0.3"
+ordered-float = "4"
+
+[dev-dependencies]
+criterion = { version = "0.5", features = ["html_reports"] }
