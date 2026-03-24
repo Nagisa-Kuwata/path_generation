@@ -9,18 +9,23 @@ const ANGLE_STEP: f32 = 2.0 * PI / NUM_RAYS as f32;
 const MAX_RANGE_M: f32 = 5.0;
 const MAX_RANGE_CELLS: f32 = MAX_RANGE_M / CELL_SIZE; // 100.0 cells
 
-/// Point cloud from one LRF scan (720 rays: 360 deg / 0.5 deg step, 5 m max range).
+/// Point-cloud snapshot from a single LRF (Laser Range Finder) scan.
+///
+/// Contains 720 rays covering 360?? at 0.5?? resolution with a 5 m maximum range.
 pub struct LrfScan {
+    /// World position of the sensor at the time of the scan.
     pub origin: WorldPos,
-    /// One point per ray. Either at the wall surface (entry boundary) or at max range.
+    /// One endpoint per ray ? either the wall surface or the max-range point.
     pub points: Vec<WorldPos>,
-    /// Parallel to `points`. `true` = ray hit a wall; `false` = reached max range.
+    /// Parallel to `points`: `true` if the ray terminated on a wall.
     pub is_wall_hit: Vec<bool>,
-    /// Parallel to `points`. `Some(gp)` = the grid cell that was hit (wall); `None` = max range.
+    /// Parallel to `points`: the grid cell that was hit, or `None` for a max-range ray.
     pub hit_cells: Vec<Option<GridPos>>,
+    /// Simulation timestamp in milliseconds.
     pub timestamp_ms: u64,
 }
 
+/// LRF simulator that performs DDA raycasting against a [`Maze`] grid.
 pub struct Lrf;
 
 impl Lrf {

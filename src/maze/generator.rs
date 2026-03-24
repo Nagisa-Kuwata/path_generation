@@ -10,13 +10,24 @@ const ROBOT_HALF: usize = 5;
 // Passage grid: 120x120 logical cells.
 // Logical cell (pc, pr) maps to grid column pc*2, row pr*2.
 // Walls between cells sit at odd indices.
-// Center (120, 120) = logical cell (60, 60) -> col=120 is even -> Passage. ?
+// Center (120, 120) = logical cell (60, 60) -> col=120 is even -> Passage. OK
 const PCOLS: usize = 120;
 const PROWS: usize = 120;
 
+/// Procedural maze generator using the Recursive Backtracking (DFS) algorithm.
+///
+/// Guarantees:
+/// - Every cell is reachable from every other cell (perfect maze / spanning tree).
+/// - The start position `GridPos { col: 120, row: 120 }` is always a `Passage`.
+/// - The goal is a randomly selected perimeter `Passage` cell.
+/// - Given the same seed the output is deterministic.
 pub struct MazeGenerator;
 
 impl MazeGenerator {
+    /// Generate a 240x~240 maze from `seed`.
+    ///
+    /// Passage cells occupy even grid indices (`col = pc * 2`, `row = pr * 2`).
+    /// Wall cells between passages occupy odd indices.
     pub fn generate(seed: u64) -> Maze {
         let mut rng = ChaCha8Rng::seed_from_u64(seed);
         // Start with all walls

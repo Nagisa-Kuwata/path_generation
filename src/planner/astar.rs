@@ -6,14 +6,16 @@ use ordered_float::OrderedFloat;
 use crate::maze::{GRID_SIZE, GridPos, WorldPos};
 use crate::robot::types::{KnownCell, KnownMap, Path};
 
+/// A* path planner operating on the robot's [`KnownMap`].
+///
+/// Unknown cells are treated optimistically as passable to allow exploration
+/// into unseen areas. Uses 8-connectivity with Euclidean distance heuristic.
 pub struct Planner;
 
 impl Planner {
-    /// A* path from `robot_pos` to `goal` using the robot's known map.
+    /// Compute the shortest path from `robot_pos` to `goal` on `known_map`.
     ///
-    /// - Unknown cells are treated as passable (optimistic exploration).
-    /// - Wall cells are impassable.
-    /// - Returns `None` if the goal is unreachable or out of bounds.
+    /// Returns `None` if the goal is confirmed unreachable (surrounded by known walls).
     pub fn plan(robot_pos: WorldPos, goal: GridPos, known_map: &KnownMap) -> Option<Path> {
         let start = GridPos::from(robot_pos);
 

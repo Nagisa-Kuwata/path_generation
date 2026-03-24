@@ -121,9 +121,9 @@ description: "Task list for robot maze simulator implementation"
 - [x] T044 `cargo fmt`・`cargo clippy -- -D warnings` を実行しすべての警告・エラーを解消する
 - [ ] T045 `cargo audit` を実行し依存クレートに既知の脆弱性がないことを確認する
 - [x] T046 `cargo test` を実行し全テストがグリーンであることを確認する
-- [ ] T047 [P] `cargo bench` を実行し LRF スキャン・A\* 経路生成が各 20 ms 以内であることを確認する
-- [ ] T048 [P] `cargo doc` を実行しドキュメントビルドが警告なしで完了することを確認する（公開 API に `///` コメント追加）
-- [ ] T049 [P] `README.md` を作成しプロジェクト概要・ビルド手順・シード指定方法を記述する
+- [x] T047 [P] `cargo bench` を実行し LRF スキャン・A\* 経路生成が各 20 ms 以内であることを確認する
+- [x] T048 [P] `cargo doc` を実行しドキュメントビルドが警告なしで完了することを確認する（公開 API に `///` コメント追加）
+- [x] T049 [P] `README.md` を作成しプロジェクト概要・ビルド手順・シード指定方法を記述する
 
 ---
 

@@ -7,12 +7,17 @@ use crate::planner::{FrontierFinder, Planner};
 use crate::robot::types::{KnownCell, Robot, RobotState};
 use crate::sensor::lrf::{Lrf, LrfScan};
 
-/// Full simulation state.
+/// Complete runtime state of the simulation.
 pub struct SimulationState {
+    /// The procedurally generated maze.
     pub maze: Maze,
+    /// The simulated robot.
     pub robot: Robot,
+    /// Most-recent LRF scan snapshot, available after the first `tick()`.
     pub lrf_scan: Option<LrfScan>,
+    /// Total simulated time elapsed in milliseconds.
     pub elapsed_ms: u64,
+    /// Seed used to generate the current maze.
     pub seed: u64,
 }
 
