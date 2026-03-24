@@ -18,8 +18,8 @@ pub struct SimApp {
     maze_tex: Option<egui::TextureHandle>,
     map_tex: Option<egui::TextureHandle>,
     /// Simulation speed multiplier (1x ? 10x).
-    speed_multiplier: u8,
-}
+    speed_multiplier: u8,    /// Exploration mode persisted across Restart/Regenerate.
+    goal_known_to_robot: bool,}
 
 impl SimApp {
     pub fn new(seed: Option<u64>) -> Self {
@@ -29,6 +29,7 @@ impl SimApp {
             maze_tex: None,
             map_tex: None,
             speed_multiplier: 1,
+            goal_known_to_robot: true,
         }
     }
 
@@ -136,6 +137,7 @@ impl App for SimApp {
                 if ui.button("Restart").clicked() {
                     let seed = self.sim.seed;
                     self.sim = SimulationState::restart(Some(seed));
+                    self.sim.goal_known_to_robot = self.goal_known_to_robot;
                     self.last_tick = None;
                     self.maze_tex = None;
                 }
@@ -143,8 +145,33 @@ impl App for SimApp {
                 // Regenerate button: restart with a new random seed.
                 if ui.button("Regenerate").clicked() {
                     self.sim = SimulationState::restart(None);
+                    self.sim.goal_known_to_robot = self.goal_known_to_robot;
                     self.last_tick = None;
                     self.maze_tex = None;
+                }
+
+                ui.separator();
+                ui.label("Mode:");
+                // Mode toggle buttons ? highlighted when active.
+                let goal_aware_btn = egui::Button::new("Goal-Aware")
+                    .fill(if self.goal_known_to_robot {
+                        egui::Color32::from_rgb(60, 130, 60)
+                    } else {
+                        egui::Color32::from_gray(55)
+                    });
+                if ui.add(goal_aware_btn).clicked() {
+                    self.goal_known_to_robot = true;
+                    self.sim.goal_known_to_robot = true;
+                }
+                let blind_btn = egui::Button::new("Blind")
+                    .fill(if !self.goal_known_to_robot {
+                        egui::Color32::from_rgb(130, 60, 60)
+                    } else {
+                        egui::Color32::from_gray(55)
+                    });
+                if ui.add(blind_btn).clicked() {
+                    self.goal_known_to_robot = false;
+                    self.sim.goal_known_to_robot = false;
                 }
 
                 ui.separator();

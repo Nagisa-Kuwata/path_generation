@@ -19,6 +19,11 @@ pub struct SimulationState {
     pub elapsed_ms: u64,
     /// Seed used to generate the current maze.
     pub seed: u64,
+    /// When `true` (goal-aware mode) the robot knows the goal location from
+    /// the start and will navigate directly once the goal cell is in the map.
+    /// When `false` (blind mode) the robot uses frontier exploration only and
+    /// reaches the goal only if it happens to pass through it.
+    pub goal_known_to_robot: bool,
 }
 
 impl SimulationState {
@@ -44,6 +49,7 @@ impl SimulationState {
             lrf_scan: None,
             elapsed_ms: 0,
             seed: actual_seed,
+            goal_known_to_robot: true, // default: goal-aware mode
         }
     }
 
@@ -77,7 +83,10 @@ impl SimulationState {
 
         let path = if dist_to_goal <= 0.05 {
             None
-        } else {
+        } else if self.goal_known_to_robot {
+            // --- Goal-aware mode ---
+            // Drive directly to the goal as soon as its cell is in the map;
+            // fall back to frontier exploration while the goal is unknown.
             let goal_cell = self.robot.known_map.cells[self.maze.goal.row as usize]
                 [self.maze.goal.col as usize];
 
@@ -101,6 +110,17 @@ impl SimulationState {
                         Planner::plan(self.robot.position, self.maze.goal, &self.robot.known_map)
                     })
             }
+        } else {
+            // --- Blind mode ---
+            // The robot does not know where the goal is. It explores using
+            // frontier BFS only. `Arrived` is triggered by controller.rs when
+            // the robot physically reaches the goal position.
+            self.robot.state = RobotState::Exploring;
+            FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
+                .and_then(|frontier| {
+                    let gp = GridPos::from(frontier);
+                    Planner::plan(self.robot.position, gp, &self.robot.known_map)
+                })
         };
 
         // 4. Move robot.
