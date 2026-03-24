@@ -273,7 +273,8 @@ impl App for SimApp {
                 }
             }
 
-            // Layer 5: Goal marker (orange X).
+            // Layer 5: Goal markers.
+            // Goal-aware goal: orange X (always shown).
             {
                 let gc = Self::grid_pos_to_screen(
                     origin,
@@ -296,6 +297,24 @@ impl App for SimApp {
                     ],
                     Stroke::new(2.0, orange),
                 );
+            }
+            // Blind-mode goal: cyan diamond (always shown so the user can see it).
+            {
+                let bg = Self::grid_pos_to_screen(
+                    origin,
+                    self.sim.maze.blind_goal.col,
+                    self.sim.maze.blind_goal.row,
+                );
+                let arm = SCALE * 2.0;
+                let cyan = Color32::from_rgb(0, 220, 220);
+                let pts = vec![
+                    Pos2::new(bg.x, bg.y - arm),
+                    Pos2::new(bg.x + arm, bg.y),
+                    Pos2::new(bg.x, bg.y + arm),
+                    Pos2::new(bg.x - arm, bg.y),
+                    Pos2::new(bg.x, bg.y - arm),
+                ];
+                painter.add(egui::Shape::line(pts, Stroke::new(2.0, cyan)));
             }
 
             // Layer 6: Robot body rectangle.

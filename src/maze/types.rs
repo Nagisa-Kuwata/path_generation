@@ -84,12 +84,14 @@ impl WorldPos {
 /// The `start` position is always the maze centre `GridPos { col: 120, row: 120 }`.
 /// The `goal` is a randomly selected perimeter cell (outer edge of the grid).
 pub struct Maze {
-    /// The full 240?~240 cell grid.
+    /// The full 240x240 cell grid.
     pub grid: Box<[[CellType; GRID_SIZE]; GRID_SIZE]>,
     /// Starting position of the robot (always the maze centre).
     pub start: GridPos,
-    /// Target position the robot must reach (perimeter cell).
+    /// Target position for goal-aware mode (perimeter cell).
     pub goal: GridPos,
+    /// Target position for blind exploration mode (random inner passage cell).
+    pub blind_goal: GridPos,
     /// Random seed used to generate this maze.
     pub seed: u64,
 }

@@ -39,6 +39,8 @@ impl SimulationState {
         };
         let maze = MazeGenerator::generate(actual_seed);
         let start_world = WorldPos::from(maze.start);
+        // Always use maze.goal for the Robot, regardless of mode; in blind mode
+        // the engine overrides which target it compares against at tick time.
         let goal = maze.goal;
         let mut robot = Robot::new(start_world, goal);
         robot.state = RobotState::Idle;
@@ -76,10 +78,20 @@ impl SimulationState {
         self.lrf_scan = Some(scan);
 
         // 3. Compute path for this tick.
-        let goal_world = WorldPos::from(self.maze.goal);
+        // In blind mode the effective goal is maze.blind_goal; in goal-aware
+        // mode it is maze.goal.  Both share the same arrival threshold.
+        let effective_goal = if self.goal_known_to_robot {
+            self.maze.goal
+        } else {
+            self.maze.blind_goal
+        };
+        let goal_world = WorldPos::from(effective_goal);
         let dgx = goal_world.x - self.robot.position.x;
         let dgy = goal_world.y - self.robot.position.y;
         let dist_to_goal = (dgx * dgx + dgy * dgy).sqrt();
+
+        // Sync robot.goal so that controller.rs arrival check uses the right target.
+        self.robot.goal = effective_goal;
 
         let path = if dist_to_goal <= 0.05 {
             None
@@ -107,7 +119,7 @@ impl SimulationState {
                         Planner::plan(self.robot.position, gp, &self.robot.known_map)
                     })
                     .or_else(|| {
-                        Planner::plan(self.robot.position, self.maze.goal, &self.robot.known_map)
+                        Planner::plan(self.robot.position, effective_goal, &self.robot.known_map)
                     })
             }
         } else {

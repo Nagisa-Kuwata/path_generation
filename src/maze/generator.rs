@@ -92,6 +92,7 @@ impl MazeGenerator {
 
         let start = GridPos { col: 120, row: 120 };
         let goal = Self::pick_goal(&mut grid, &mut rng);
+        let blind_goal = Self::pick_blind_goal(&grid, &mut rng, start);
         // Border cells (pc=0, pc=119, pr=0, pr=119) are never visited by the
         // DFS (see unvisited_neighbors), so they remain Wall. No further
         // sealing is needed; pick_goal carves the only exit opening.
@@ -100,6 +101,7 @@ impl MazeGenerator {
             grid,
             start,
             goal,
+            blind_goal,
             seed,
         }
     }
@@ -118,13 +120,33 @@ impl MazeGenerator {
         n
     }
 
+    // Pick a random inner passage cell (even indices, not the start) for blind mode.
+    fn pick_blind_goal(
+        grid: &[[CellType; GRID_SIZE]; GRID_SIZE],
+        rng: &mut ChaCha8Rng,
+        start: GridPos,
+    ) -> GridPos {
+        let mut candidates: Vec<GridPos> = Vec::new();
+        // Even indices only (logical passage cells), skip pc=0/119 and pr=0/119 border.
+        for pr in 1..PROWS - 1 {
+            for pc in 1..PCOLS - 1 {
+                let col = (pc * 2) as u16;
+                let row = (pr * 2) as u16;
+                if grid[row as usize][col as usize] == CellType::Passage
+                    && !(col == start.col && row == start.row)
+                {
+                    candidates.push(GridPos { col, row });
+                }
+            }
+        }
+        candidates
+            .choose(rng)
+            .copied()
+            .unwrap_or(GridPos { col: 2, row: 2 })
+    }
+
     // Pick the goal: choose a random inner border cell and carve an opening
     // through the outer wall so the goal is always reachable from the interior.
-    //
-    // The DFS never visits pc=0/119 or pr=0/119 (see unvisited_neighbors), so
-    // the physical border is all-Wall.  We punch a single passage through it:
-    //   Left-edge goals (col=0)  ? carve connector col=1 and goal cell col=0.
-    //   Top-edge goals  (row=0)  ? carve connector row=1 and goal cell row=0.
     fn pick_goal(grid: &mut [[CellType; GRID_SIZE]; GRID_SIZE], rng: &mut ChaCha8Rng) -> GridPos {
         let n = GRID_SIZE;
         let mut candidates: Vec<GridPos> = Vec::new();
