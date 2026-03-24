@@ -17,6 +17,8 @@ pub struct SimApp {
     last_tick: Option<Instant>,
     maze_tex: Option<egui::TextureHandle>,
     map_tex: Option<egui::TextureHandle>,
+    /// Simulation speed multiplier (1x ? 10x).
+    speed_multiplier: u8,
 }
 
 impl SimApp {
@@ -26,6 +28,7 @@ impl SimApp {
             last_tick: None,
             maze_tex: None,
             map_tex: None,
+            speed_multiplier: 1,
         }
     }
 
@@ -85,7 +88,18 @@ impl App for SimApp {
                 .unwrap_or(20)
                 .min(100); // cap at 100 ms to avoid large jumps
             self.last_tick = Some(now);
-            self.sim.tick(delta_ms);
+
+            // Run `speed_multiplier` sub-ticks so each is small enough that
+            // the robot does not skip waypoints, while achieving Nx wall-clock speed.
+            let n = self.speed_multiplier as u64;
+            let sub_ms = (delta_ms / n).max(1);
+            for _ in 0..n {
+                if self.sim.robot.state != RobotState::Idle
+                    && self.sim.robot.state != RobotState::Arrived
+                {
+                    self.sim.tick(sub_ms);
+                }
+            }
             ctx.request_repaint();
         }
 
@@ -131,6 +145,14 @@ impl App for SimApp {
                     self.last_tick = None;
                     self.maze_tex = None;
                 }
+
+                ui.separator();
+                ui.label("Speed:");
+                ui.add(
+                    egui::Slider::new(&mut self.speed_multiplier, 1u8..=10)
+                        .suffix("x")
+                        .integer()
+                );
 
                 ui.separator();
                 ui.label(format!("Seed: {}", self.sim.seed));
@@ -179,7 +201,24 @@ impl App for SimApp {
                 Color32::WHITE,
             );
 
-            // Layer 3: LRF point cloud (light green dots).
+            // Layer 3: Start position marker (persistent red mark).
+            {
+                let sc = Self::grid_pos_to_screen(
+                    origin,
+                    self.sim.maze.start.col,
+                    self.sim.maze.start.row,
+                );
+                let arm = SCALE * 2.0;
+                let start_red = Color32::from_rgb(200, 30, 30);
+                // Draw a filled small square.
+                painter.rect_filled(
+                    Rect::from_center_size(sc, Vec2::new(arm * 2.0, arm * 2.0)),
+                    0.0,
+                    start_red,
+                );
+            }
+
+            // Layer 4: LRF point cloud (light green dots).
             if let Some(scan) = &self.sim.lrf_scan {
                 for pt in &scan.points {
                     let gp = GridPos::from(*pt);

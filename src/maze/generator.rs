@@ -1,4 +1,4 @@
-use rand::SeedableRng;
+﻿use rand::SeedableRng;
 use rand::seq::SliceRandom;
 use rand_chacha::ChaCha8Rng;
 
@@ -92,6 +92,9 @@ impl MazeGenerator {
 
         let start = GridPos { col: 120, row: 120 };
         let goal = Self::pick_goal(&mut grid, &mut rng);
+        // Border cells (pc=0, pc=119, pr=0, pr=119) are never visited by the
+        // DFS (see unvisited_neighbors), so they remain Wall. No further
+        // sealing is needed; pick_goal carves the only exit opening.
 
         Maze {
             grid,
@@ -101,72 +104,52 @@ impl MazeGenerator {
         }
     }
 
+    /// Restrict DFS to inner logical cells only: pc = 1..=PCOLS-2, pr = 1..=PROWS-2.
+    /// This ensures the physical border (row 0, row 239, col 0, col 239) can never
+    /// become a Passage through DFS carving, so the outer wall is always solid.
     fn unvisited_neighbors(pc: usize, pr: usize, visited: &[Vec<bool>]) -> Vec<(usize, usize)> {
         let mut n = Vec::new();
-        if pc > 0 && !visited[pr][pc - 1] {
-            n.push((pc - 1, pr));
-        }
-        if pc + 1 < PCOLS && !visited[pr][pc + 1] {
-            n.push((pc + 1, pr));
-        }
-        if pr > 0 && !visited[pr - 1][pc] {
-            n.push((pc, pr - 1));
-        }
-        if pr + 1 < PROWS && !visited[pr + 1][pc] {
-            n.push((pc, pr + 1));
-        }
+        // pc > 1  ??  can move left  (destination pc-1 >= 1, within inner range)
+        if pc > 1 && !visited[pr][pc - 1] { n.push((pc - 1, pr)); }
+        // pc+1 < PCOLS-1  ??  can move right (destination pc+1 <= PCOLS-2 = 118)
+        if pc + 1 < PCOLS - 1 && !visited[pr][pc + 1] { n.push((pc + 1, pr)); }
+        if pr > 1 && !visited[pr - 1][pc] { n.push((pc, pr - 1)); }
+        if pr + 1 < PROWS - 1 && !visited[pr + 1][pc] { n.push((pc, pr + 1)); }
         n
     }
 
-    // Pick goal after grid is fully built; open a wall if no perimeter passage exists.
+    // Pick the goal: choose a random inner border cell and carve an opening
+    // through the outer wall so the goal is always reachable from the interior.
+    //
+    // The DFS never visits pc=0/119 or pr=0/119 (see unvisited_neighbors), so
+    // the physical border is all-Wall.  We punch a single passage through it:
+    //   Left-edge goals (col=0)  ? carve connector col=1 and goal cell col=0.
+    //   Top-edge goals  (row=0)  ? carve connector row=1 and goal cell row=0.
     fn pick_goal(grid: &mut [[CellType; GRID_SIZE]; GRID_SIZE], rng: &mut ChaCha8Rng) -> GridPos {
         let n = GRID_SIZE;
         let mut candidates: Vec<GridPos> = Vec::new();
 
-        for (col, cell) in grid[0].iter().enumerate() {
-            if *cell == CellType::Passage {
-                candidates.push(GridPos { col: col as u16, row: 0 });
-            }
+        // Left-edge goals: inner cells at pc=1, pr=1..=PROWS-2.
+        // Goal at physical (col=0, row=pr*2); connector at (col=1, row=pr*2).
+        for pr in 1..PROWS - 1 {
+            candidates.push(GridPos { col: 0, row: (pr * 2) as u16 });
         }
-        for (col, cell) in grid[n - 1].iter().enumerate() {
-            if *cell == CellType::Passage {
-                candidates.push(GridPos {
-                    col: col as u16,
-                    row: (n - 1) as u16,
-                });
-            }
-        }
-        for (row, row_data) in grid.iter().enumerate().skip(1).take(n - 2) {
-            if row_data[0] == CellType::Passage {
-                candidates.push(GridPos {
-                    col: 0,
-                    row: row as u16,
-                });
-            }
-            if row_data[n - 1] == CellType::Passage {
-                candidates.push(GridPos {
-                    col: (n - 1) as u16,
-                    row: row as u16,
-                });
-            }
+        // Top-edge goals: inner cells at pr=1, pc=1..=PCOLS-2.
+        // Goal at physical (col=pc*2, row=0); connector at (col=pc*2, row=1).
+        for pc in 1..PCOLS - 1 {
+            candidates.push(GridPos { col: (pc * 2) as u16, row: 0 });
         }
 
-        if candidates.is_empty() {
-            // Open the nearest even passage column's top cell as an exit
-            for pc in 0..PCOLS {
-                let col = pc * 2;
-                if col < n {
-                    grid[0][col] = CellType::Passage;
-                    return GridPos {
-                        col: col as u16,
-                        row: 0,
-                    };
-                }
-            }
-            return GridPos { col: 0, row: 0 };
-        }
+        let &goal = candidates.choose(rng).unwrap();
+        let gc = goal.col as usize;
+        let gr = goal.row as usize;
 
-        *candidates.choose(rng).unwrap()
+        // Open the border cell (goal) and the connector one step inward.
+        grid[gr][gc] = CellType::Passage;
+        if gc == 0 && gc + 1 < n { grid[gr][1] = CellType::Passage; } // left edge
+        if gr == 0 && gr + 1 < n { grid[1][gc] = CellType::Passage; } // top edge
+
+        goal
     }
 }
 

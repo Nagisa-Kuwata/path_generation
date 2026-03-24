@@ -66,7 +66,9 @@ impl Planner {
             start_lr,
         )));
 
+        let mut _dbg_iters = 0usize;
         while let Some(Reverse((_, lc, lr))) = open.pop() {
+            _dbg_iters += 1;
             if lc == goal_lc && lr == goal_lr {
                 return Some(lreconstruct(sk, gk, &came_from, robot_pos));
             }
