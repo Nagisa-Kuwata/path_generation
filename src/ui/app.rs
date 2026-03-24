@@ -89,15 +89,16 @@ impl App for SimApp {
                 .min(100); // cap at 100 ms to avoid large jumps
             self.last_tick = Some(now);
 
-            // Run `speed_multiplier` sub-ticks so each is small enough that
-            // the robot does not skip waypoints, while achieving Nx wall-clock speed.
+            // Run `speed_multiplier` sub-ticks per frame, each with the same
+            // delta_ms.  Total simulated time per frame = delta_ms * n, giving
+            // a true Nx wall-clock speed-up while keeping each step small
+            // enough that the robot does not skip waypoints.
             let n = self.speed_multiplier as u64;
-            let sub_ms = (delta_ms / n).max(1);
             for _ in 0..n {
                 if self.sim.robot.state != RobotState::Idle
                     && self.sim.robot.state != RobotState::Arrived
                 {
-                    self.sim.tick(sub_ms);
+                    self.sim.tick(delta_ms);
                 }
             }
             ctx.request_repaint();
