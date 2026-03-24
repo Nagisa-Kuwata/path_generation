@@ -8,55 +8,71 @@ use crate::robot::types::{KnownCell, KnownMap, Path};
 
 /// A* path planner operating on the robot's [`KnownMap`].
 ///
-/// Unknown cells are treated optimistically as passable to allow exploration
-/// into unseen areas. Uses 8-connectivity with Euclidean distance heuristic.
+/// Operates on **logical cells** (even grid indices only).
+/// Each logical cell `(lc, lr)` maps to physical cell `(lc*2, lr*2)`.
+/// Movement between two adjacent logical cells is allowed only when the
+/// wall cell between them is not a confirmed Wall.
 pub struct Planner;
+
+// Number of logical cells per side (240 / 2 = 120).
+const LCOLS: usize = GRID_SIZE / 2;
+const LROWS: usize = GRID_SIZE / 2;
 
 impl Planner {
     /// Compute the shortest path from `robot_pos` to `goal` on `known_map`.
     ///
-    /// Returns `None` if the goal is confirmed unreachable (surrounded by known walls).
+    /// Returns `None` if the goal is confirmed unreachable.
     pub fn plan(robot_pos: WorldPos, goal: GridPos, known_map: &KnownMap) -> Option<Path> {
-        let start = GridPos::from(robot_pos);
+        // Convert physical grid pos to logical cell.
+        let phys_start = GridPos::from(robot_pos).snap_even();
+        // Already even after snap.
+        let start_lc = (phys_start.col as usize / 2).min(LCOLS - 1);
+        let start_lr = (phys_start.row as usize / 2).min(LROWS - 1);
 
-        if start.col == goal.col && start.row == goal.row {
+        let goal_lc = ((goal.col as usize).min(GRID_SIZE - 1) / 2).min(LCOLS - 1);
+        let goal_lr = ((goal.row as usize).min(GRID_SIZE - 1) / 2).min(LROWS - 1);
+
+        if start_lc == goal_lc && start_lr == goal_lr {
             return Some(Path {
                 waypoints: vec![robot_pos],
                 is_to_frontier: false,
             });
         }
 
-        // Min-heap keyed by f = g + h.
-        let mut open: BinaryHeap<Reverse<(OrderedFloat<f32>, u16, u16)>> = BinaryHeap::new();
-        // g_cost[(col, row)] = best cost from start so far.
-        let mut g_cost: HashMap<(u16, u16), f32> = HashMap::new();
-        let mut came_from: HashMap<(u16, u16), (u16, u16)> = HashMap::new();
+        let sk = (start_lc, start_lr);
+        let gk = (goal_lc, goal_lr);
 
-        let sk = (start.col, start.row);
+        let mut open: BinaryHeap<Reverse<(OrderedFloat<f32>, usize, usize)>> = BinaryHeap::new();
+        let mut g_cost: HashMap<(usize, usize), f32> = HashMap::new();
+        let mut came_from: HashMap<(usize, usize), (usize, usize)> = HashMap::new();
+
         g_cost.insert(sk, 0.0);
         open.push(Reverse((
-            OrderedFloat(heuristic(start, goal)),
-            start.col,
-            start.row,
+            OrderedFloat(lheuristic(start_lc, start_lr, goal_lc, goal_lr)),
+            start_lc,
+            start_lr,
         )));
 
-        while let Some(Reverse((_, col, row))) = open.pop() {
-            if col == goal.col && row == goal.row {
-                return Some(reconstruct(sk, (col, row), &came_from));
+        while let Some(Reverse((_, lc, lr))) = open.pop() {
+            if lc == goal_lc && lr == goal_lr {
+                return Some(lreconstruct(sk, gk, &came_from, robot_pos));
             }
-            let current_g = *g_cost.get(&(col, row)).unwrap_or(&f32::MAX);
+            let current_g = *g_cost.get(&(lc, lr)).unwrap_or(&f32::MAX);
 
-            for (nc, nr, cost) in neighbors(col, row) {
-                if !is_passable(nc, nr, known_map) {
+            for (nlc, nlr) in logical_neighbors(lc, lr) {
+                // The wall cell between (lc, lr) and (nlc, nlr).
+                let wall_c = lc + nlc; // lc*2 + (nlc-lc) = wall physical col
+                let wall_r = lr + nlr;
+                if !is_passable_wall(wall_c, wall_r, known_map) {
                     continue;
                 }
-                let new_g = current_g + cost;
-                let nk = (nc, nr);
+                let new_g = current_g + 1.0;
+                let nk = (nlc, nlr);
                 if new_g < *g_cost.get(&nk).unwrap_or(&f32::MAX) {
                     g_cost.insert(nk, new_g);
-                    came_from.insert(nk, (col, row));
-                    let f = new_g + heuristic(GridPos { col: nc, row: nr }, goal);
-                    open.push(Reverse((OrderedFloat(f), nc, nr)));
+                    came_from.insert(nk, (lc, lr));
+                    let f = new_g + lheuristic(nlc, nlr, goal_lc, goal_lr);
+                    open.push(Reverse((OrderedFloat(f), nlc, nlr)));
                 }
             }
         }
@@ -65,53 +81,50 @@ impl Planner {
     }
 }
 
-/// Euclidean distance heuristic.
-fn heuristic(pos: GridPos, goal: GridPos) -> f32 {
-    let dc = (pos.col as f32 - goal.col as f32).abs();
-    let dr = (pos.row as f32 - goal.row as f32).abs();
+/// Euclidean heuristic in logical-cell space.
+fn lheuristic(lc: usize, lr: usize, glc: usize, glr: usize) -> f32 {
+    let dc = (lc as f32 - glc as f32).abs();
+    let dr = (lr as f32 - glr as f32).abs();
     (dc * dc + dr * dr).sqrt()
 }
 
-/// 8-connected neighbors with move cost (cardinal=1.0, diagonal=sqrt(2)).
-fn neighbors(col: u16, row: u16) -> Vec<(u16, u16, f32)> {
-    let mut result = Vec::with_capacity(8);
-    let c = col as i32;
-    let r = row as i32;
-    for dc in -1..=1_i32 {
-        for dr in -1..=1_i32 {
-            if dc == 0 && dr == 0 {
-                continue;
-            }
-            let nc = c + dc;
-            let nr = r + dr;
-            if nc >= 0 && nr >= 0 && nc < GRID_SIZE as i32 && nr < GRID_SIZE as i32 {
-                let cost = if dc == 0 || dr == 0 { 1.0 } else { 1.414 };
-                result.push((nc as u16, nr as u16, cost));
-            }
-        }
-    }
+/// 4-connected logical-cell neighbors.
+fn logical_neighbors(lc: usize, lr: usize) -> Vec<(usize, usize)> {
+    let mut result = Vec::with_capacity(4);
+    if lc > 0 { result.push((lc - 1, lr)); }
+    if lc + 1 < LCOLS { result.push((lc + 1, lr)); }
+    if lr > 0 { result.push((lc, lr - 1)); }
+    if lr + 1 < LROWS { result.push((lc, lr + 1)); }
     result
 }
 
-/// A cell is passable if it is not a known Wall.
-/// Unknown cells are optimistically treated as passable (for exploration).
-fn is_passable(col: u16, row: u16, known_map: &KnownMap) -> bool {
-    known_map.cells[row as usize][col as usize] != KnownCell::Wall
+/// The wall cell between two adjacent logical cells.
+/// `wall_c = lc + nlc` and `wall_r = lr + nlr` because the physical
+/// coordinates are `lc*2` and `nlc*2`, so the dividing cell is
+/// `lc*2 + 1 = lc + nlc` when `nlc = lc + 1`.
+/// A cell is passable if it is not a confirmed Wall (Unknown = optimistic).
+fn is_passable_wall(wall_c: usize, wall_r: usize, known_map: &KnownMap) -> bool {
+    if wall_c >= GRID_SIZE || wall_r >= GRID_SIZE {
+        return false;
+    }
+    known_map.cells[wall_r][wall_c] != KnownCell::Wall
 }
 
-/// Reconstruct the path from start to goal via `came_from` map.
-fn reconstruct(
-    start: (u16, u16),
-    goal: (u16, u16),
-    came_from: &HashMap<(u16, u16), (u16, u16)>,
+/// Reconstruct path, converting logical cells back to physical WorldPos.
+/// The first waypoint is the robot's current world position to avoid snapping.
+/// Between each pair of consecutive logical cells, the connector (wall/passage)
+/// cell at the odd index is inserted so the robot always travels axis-aligned
+/// through that cell rather than cutting diagonally across an (odd,odd) corner.
+fn lreconstruct(
+    start: (usize, usize),
+    goal: (usize, usize),
+    came_from: &HashMap<(usize, usize), (usize, usize)>,
+    robot_pos: WorldPos,
 ) -> Path {
-    let mut waypoints = Vec::new();
+    let mut cells = Vec::new();
     let mut cur = goal;
     loop {
-        waypoints.push(WorldPos::from(GridPos {
-            col: cur.0,
-            row: cur.1,
-        }));
+        cells.push(cur);
         if cur == start {
             break;
         }
@@ -120,7 +133,41 @@ fn reconstruct(
             None => break,
         }
     }
-    waypoints.reverse();
+    cells.reverse();
+
+    // Build waypoints from the start logical cell onward.
+    // We intentionally do NOT insert robot_pos as the first waypoint,
+    // because the robot may currently sit on a connector cell (odd,even) that
+    // is within ARRIVAL_THRESHOLD of the planned connector/passage waypoints,
+    // which would cause every waypoint to be skipped and the robot to freeze.
+    // Instead, the first waypoint is the snapped even-cell (start logical cell),
+    // ensuring the robot always moves to a passage cell before following the path.
+    let _ = robot_pos; // kept in signature for API compatibility
+    let mut waypoints = Vec::new();
+    // First waypoint: the start even-passage cell itself (snap destination).
+    if let Some(&(slc, slr)) = cells.first() {
+        waypoints.push(WorldPos::from(GridPos {
+            col: (slc * 2) as u16,
+            row: (slr * 2) as u16,
+        }));
+    }
+    for window in cells.windows(2) {
+        let (lc0, lr0) = window[0];
+        let (lc1, lr1) = window[1];
+        // Connector cell sits at the average of the two physical coordinates.
+        let conn_col = (lc0 + lc1) as u16; // = lc0*2 + (lc1 - lc0) step = lc0+lc1
+        let conn_row = (lr0 + lr1) as u16;
+        waypoints.push(WorldPos::from(GridPos {
+            col: conn_col,
+            row: conn_row,
+        }));
+        // Destination even cell.
+        waypoints.push(WorldPos::from(GridPos {
+            col: (lc1 * 2) as u16,
+            row: (lr1 * 2) as u16,
+        }));
+    }
+
     Path {
         waypoints,
         is_to_frontier: false,

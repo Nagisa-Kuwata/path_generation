@@ -56,6 +56,20 @@ impl From<WorldPos> for GridPos {
     }
 }
 
+impl GridPos {
+    /// Snap to the nearest logical cell (even col and row).
+    ///
+    /// The maze passage cells always sit at even indices. This prevents the
+    /// robot, which may momentarily be positioned on an odd-indexed connector
+    /// cell during movement, from being mis-classified as being on a wall cell.
+    pub fn snap_even(self) -> GridPos {
+        // Round each coordinate to the nearest even number.
+        let col = ((self.col as usize + 1) / 2 * 2).min(GRID_SIZE - 2) as u16;
+        let row = ((self.row as usize + 1) / 2 * 2).min(GRID_SIZE - 2) as u16;
+        GridPos { col, row }
+    }
+}
+
 impl WorldPos {
     /// Euclidean distance to another [`WorldPos`] in metres.
     pub fn distance(self, other: WorldPos) -> f32 {

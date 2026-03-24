@@ -125,6 +125,13 @@ impl App for SimApp {
                     self.maze_tex = None;
                 }
 
+                // Regenerate button: restart with a new random seed.
+                if ui.button("Regenerate").clicked() {
+                    self.sim = SimulationState::restart(None);
+                    self.last_tick = None;
+                    self.maze_tex = None;
+                }
+
                 ui.separator();
                 ui.label(format!("Seed: {}", self.sim.seed));
 

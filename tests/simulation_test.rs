@@ -1,6 +1,6 @@
 // T019, T031: simulation restart and tick integration tests
 use path_generation::maze::types::{GRID_SIZE, GridPos};
-use path_generation::robot::types::RobotState;
+use path_generation::robot::types::{KnownCell, RobotState};
 use path_generation::simulation::SimulationState;
 
 // T019: restart tests
@@ -76,6 +76,97 @@ fn tick_moves_robot_after_start() {
     let dy = sim.robot.position.y - pos_before.1;
     let dist = (dx * dx + dy * dy).sqrt();
     assert!(dist > 0.0, "robot should have moved after tick");
+}
+
+// Diagnostic: run N ticks on several seeds; print state when robot gets stuck.
+// This is not an assertion test ? it uses `-- --nocapture` to show debug info.
+#[test]
+fn diag_stuck_detection() {
+    for seed in [0u64, 1, 2, 42, 100, 999, 12345, 7777, 31337] {
+        let mut sim = SimulationState::restart(Some(seed));
+        sim.start();
+        let mut last_pos = sim.robot.position;
+        let mut stuck_ticks = 0u32;
+        let mut total_ticks = 0u32;
+
+        for _ in 0..3000 {
+            sim.tick(20);
+            total_ticks += 1;
+            let dx = sim.robot.position.x - last_pos.x;
+            let dy = sim.robot.position.y - last_pos.y;
+            if (dx * dx + dy * dy).sqrt() < 0.001 {
+                stuck_ticks += 1;
+            } else {
+                stuck_ticks = 0;
+            }
+            last_pos = sim.robot.position;
+
+            if sim.robot.state == RobotState::Arrived {
+                println!("seed={seed} ARRIVED at tick={total_ticks}");
+                break;
+            }
+
+            if stuck_ticks >= 10 {
+                let gp: GridPos = sim.robot.position.into();
+                let known_at_robot = sim.robot.known_map.cells[gp.row as usize][gp.col as usize];
+                let maze_at_robot = sim.maze.grid[gp.row as usize][gp.col as usize];
+                let lc = gp.col as usize / 2;
+                let lr = gp.row as usize / 2;
+
+                let neighbors: Vec<(i32, i32, KnownCell)> = [(-1i32, 0i32), (1, 0), (0, -1), (0, 1)]
+                    .iter()
+                    .filter_map(|&(dc, dr)| {
+                        let c = gp.col as i32 + dc;
+                        let r = gp.row as i32 + dr;
+                        if c >= 0 && r >= 0 && c < GRID_SIZE as i32 && r < GRID_SIZE as i32 {
+                            Some((c, r, sim.robot.known_map.cells[r as usize][c as usize]))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                println!(
+                    "seed={seed} STUCK tick={total_ticks} pos=({:.3},{:.3}) phys=({},{}) logical=({lc},{lr}) state={:?} known={:?} maze={:?}",
+                    sim.robot.position.x, sim.robot.position.y,
+                    gp.col, gp.row, sim.robot.state,
+                    known_at_robot, maze_at_robot
+                );
+                println!("  cardinal known neighbours: {:?}", neighbors);
+
+                // Show FreeSpace cells nearby
+                let mut free_cells: Vec<String> = Vec::new();
+                for r in (gp.row as usize).saturating_sub(3)..=(gp.row as usize + 3).min(GRID_SIZE-1) {
+                    for c in (gp.col as usize).saturating_sub(3)..=(gp.col as usize + 3).min(GRID_SIZE-1) {
+                        if sim.robot.known_map.cells[r][c] == KnownCell::FreeSpace {
+                            free_cells.push(format!("p({c},{r})l({}/{})", c/2, r/2));
+                        }
+                    }
+                }
+                println!("  FreeSpace within 3 cells: {:?}", free_cells);
+
+                match &sim.robot.current_path {
+                    None => println!("  current_path: None"),
+                    Some(p) => {
+                        println!("  current_path waypoints: {}", p.waypoints.len());
+                        for (i, wp) in p.waypoints.iter().take(6).enumerate() {
+                            let wgp: GridPos = (*wp).into();
+                            let wk = sim.robot.known_map.cells[wgp.row as usize][wgp.col as usize];
+                            let wm = sim.maze.grid[wgp.row as usize][wgp.col as usize];
+                            println!(
+                                "    wp[{i}] ({:.3},{:.3}) phys=({},{}) logical=({}/{}) known={:?} maze={:?}",
+                                wp.x, wp.y, wgp.col, wgp.row, wgp.col/2, wgp.row/2, wk, wm
+                            );
+                        }
+                    }
+                }
+                break;
+            }
+        }
+        if sim.robot.state != RobotState::Arrived && stuck_ticks < 10 {
+            println!("seed={seed} still running at tick={total_ticks} state={:?}", sim.robot.state);
+        }
+    }
 }
 
 #[test]
