@@ -78,6 +78,61 @@ fn tick_moves_robot_after_start() {
     assert!(dist > 0.0, "robot should have moved after tick");
 }
 
+// Diagnostic: track exploration progress over a long run to see if it ever finishes.
+// Run with: cargo test --release --test simulation_test diag_exploration_progress -- --nocapture
+#[test]
+fn diag_exploration_progress() {
+    use path_generation::maze::types::GRID_SIZE;
+    for seed in [0u64, 42, 999] {
+        let mut sim = SimulationState::restart(Some(seed));
+        sim.start();
+        let goal = sim.maze.goal;
+        let total_cells = (GRID_SIZE * GRID_SIZE) as usize;
+        let mut arrived_tick = None;
+
+        for tick in 0..30_000usize {
+            sim.tick(20);
+
+            if sim.robot.state == RobotState::Arrived {
+                arrived_tick = Some(tick);
+                break;
+            }
+
+            // Print progress every 5000 ticks.
+            if tick % 5000 == 4999 {
+                let free_count = sim.robot.known_map.cells.iter()
+                    .flat_map(|r| r.iter())
+                    .filter(|&&c| c == KnownCell::FreeSpace)
+                    .count();
+                let goal_known = sim.robot.known_map.cells[goal.row as usize][goal.col as usize];
+                let pos = sim.robot.position;
+                let gp: GridPos = pos.into();
+                println!(
+                    "seed={seed} tick={} free={}/{} ({:.1}%) goal_cell={:?} state={:?} pos=({},{})@({:.2},{:.2})",
+                    tick + 1, free_count, total_cells,
+                    100.0 * free_count as f32 / total_cells as f32,
+                    goal_known, sim.robot.state,
+                    gp.col, gp.row, pos.x, pos.y
+                );
+            }
+        }
+
+        let free_count = sim.robot.known_map.cells.iter()
+            .flat_map(|r| r.iter())
+            .filter(|&&c| c == KnownCell::FreeSpace)
+            .count();
+        let goal_known = sim.robot.known_map.cells[goal.row as usize][goal.col as usize];
+        if let Some(t) = arrived_tick {
+            println!("seed={seed} ARRIVED at tick={t} goal=({},{}) final_free={free_count}", goal.col, goal.row);
+        } else {
+            println!(
+                "seed={seed} NOT ARRIVED after 30000 ticks. free={free_count}/{total_cells} goal_cell={:?} goal=({},{})",
+                goal_known, goal.col, goal.row
+            );
+        }
+    }
+}
+
 // Diagnostic: run N ticks on several seeds; print state when robot gets stuck.
 // This is not an assertion test ? it uses `-- --nocapture` to show debug info.
 #[test]

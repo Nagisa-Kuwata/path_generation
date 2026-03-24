@@ -33,8 +33,21 @@ impl Planner {
         let goal_lr = ((goal.row as usize).min(GRID_SIZE - 1) / 2).min(LROWS - 1);
 
         if start_lc == goal_lc && start_lr == goal_lr {
+            // Robot is in the same logical cell as the goal but may not yet
+            // have physically reached the goal (up to one cell-width away).
+            // Include the actual goal world position so the controller drives
+            // the robot to the exact target rather than standing still.
+            // If robot_pos is already at the goal (distance ? 0), one waypoint suffices.
+            let goal_world = WorldPos::from(goal);
+            let ddx = goal_world.x - robot_pos.x;
+            let ddy = goal_world.y - robot_pos.y;
+            let dist_sq = ddx * ddx + ddy * ddy;
+            let mut waypoints = vec![robot_pos];
+            if dist_sq > 1e-6 {
+                waypoints.push(goal_world);
+            }
             return Some(Path {
-                waypoints: vec![robot_pos],
+                waypoints,
                 is_to_frontier: false,
             });
         }
@@ -135,22 +148,14 @@ fn lreconstruct(
     }
     cells.reverse();
 
-    // Build waypoints from the start logical cell onward.
-    // We intentionally do NOT insert robot_pos as the first waypoint,
-    // because the robot may currently sit on a connector cell (odd,even) that
-    // is within ARRIVAL_THRESHOLD of the planned connector/passage waypoints,
-    // which would cause every waypoint to be skipped and the robot to freeze.
-    // Instead, the first waypoint is the snapped even-cell (start logical cell),
-    // ensuring the robot always moves to a passage cell before following the path.
-    let _ = robot_pos; // kept in signature for API compatibility
-    let mut waypoints = Vec::new();
-    // First waypoint: the start even-passage cell itself (snap destination).
-    if let Some(&(slc, slr)) = cells.first() {
-        waypoints.push(WorldPos::from(GridPos {
-            col: (slc * 2) as u16,
-            row: (slr * 2) as u16,
-        }));
-    }
+    // Build waypoints: robot's current world position first, then for each
+    // logical step insert the connector cell (odd-index passage between two
+    // even cells) followed by the destination even cell.
+    // Using robot_pos as the initial waypoint avoids any backward movement:
+    // the controller skips waypoints closer than WP_THRESHOLD (0.025 m), so
+    // even if the connector of step-0 coincides with the robot position, the
+    // next destination cell (0.05 m away) is always reachable.
+    let mut waypoints = vec![robot_pos];
     for window in cells.windows(2) {
         let (lc0, lr0) = window[0];
         let (lc1, lr1) = window[1];

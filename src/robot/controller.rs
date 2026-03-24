@@ -2,7 +2,8 @@ use crate::maze::{CELL_SIZE, GRID_SIZE, WorldPos};
 use crate::robot::types::{KnownCell, Path, Robot, RobotState};
 use crate::sensor::LrfScan;
 
-const ARRIVAL_THRESHOLD: f32 = 0.05; // meters
+const ARRIVAL_THRESHOLD: f32 = 0.05; // meters ? used only for goal-arrival detection
+const WP_THRESHOLD: f32 = ARRIVAL_THRESHOLD / 2.0; // 0.025 m ? waypoint advancement
 
 impl Robot {
     /// Update the robot's known map from one LRF scan.
@@ -136,7 +137,7 @@ impl Robot {
             let dx = wp.x - self.position.x;
             let dy = wp.y - self.position.y;
             let dist = (dx * dx + dy * dy).sqrt();
-            if dist <= ARRIVAL_THRESHOLD {
+            if dist <= WP_THRESHOLD {
                 continue;
             }
             let ux = dx / dist;
