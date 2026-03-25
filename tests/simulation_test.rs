@@ -462,7 +462,7 @@ fn diag_frontier_internals() {
 // cargo test --release --test simulation_test diag_blind_freeze_seed -- --nocapture
 #[test]
 fn diag_blind_freeze_seed() {
-    const SEED: u64 = 1568540015947530764;
+    const SEED: u64 = 4684074858222377819;
     const MAX_TICKS: usize = 500_000; // ~10000 s at 20 ms/tick
     const STUCK_WINDOW: u32 = 200;    // ~4 s of no movement
     const REPORT_EVERY: usize = 10_000;

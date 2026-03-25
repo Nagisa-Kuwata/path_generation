@@ -28,6 +28,12 @@ pub struct SimulationState {
     /// reachable.  Held across ticks until the robot arrives (avoids
     /// oscillation from picking a new nearest-Unknown cell every tick).
     wander_target: Option<GridPos>,
+    /// Set to `true` the first time `nearest_unknown` returns `None` in
+    /// Blind mode.  Once all reachable Unknown passage cells are gone the
+    /// robot switches to a direct post-exploration path to `blind_goal`
+    /// rather than continuing to chase permanent "frontiers" caused by
+    /// Unknown connector cells that the LRF never managed to reach.
+    exploration_complete: bool,
 }
 
 impl SimulationState {
@@ -57,6 +63,7 @@ impl SimulationState {
             seed: actual_seed,
             goal_known_to_robot: true, // default: goal-aware mode
             wander_target: None,
+            exploration_complete: false,
         }
     }
 
@@ -137,35 +144,85 @@ impl SimulationState {
             // every tick (which would flip the robot's direction as the LRF
             // reveals new cells each step).
             self.robot.state = RobotState::Exploring;
-            FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
-                .and_then(|frontier| {
-                    let gp = GridPos::from(frontier);
+
+            if self.exploration_complete {
+                // Post-exploration: all reachable Unknown passage cells are
+                // gone.  Navigate directly to blind_goal so the arrival check
+                // fires.  Some FreeSpace cells were mapped remotely via LRF
+                // without the robot physically passing through them; this step
+                // closes that gap.  The exploration phase was entirely
+                // goal-unaware; this is a completion step only.
+                Planner::plan(
+                    self.robot.position,
+                    self.maze.blind_goal,
+                    &self.robot.known_map,
+                )
+            } else {
+                FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
+                    .and_then(|frontier| {
+                        let gp = GridPos::from(frontier);
                     Planner::plan(self.robot.position, gp, &self.robot.known_map)
                 })
                 .or_else(|| {
-                    // Refresh wander_target only when None or robot has arrived
-                    // (within 3 cells = 0.15 m of the target).
+                    // Decide whether to refresh wander_target:
+                    //  (a) None yet
+                    //  (b) Robot arrived within 0.15 m of target
+                    //  (c) Target cell is no longer Unknown (already explored)
                     let needs_refresh = match self.wander_target {
                         None => true,
                         Some(t) => {
+                            // (b) proximity
                             let tw = WorldPos::from(t);
                             let dx = tw.x - self.robot.position.x;
                             let dy = tw.y - self.robot.position.y;
-                            (dx * dx + dy * dy).sqrt() < 0.15
+                            let close = (dx * dx + dy * dy).sqrt() < 0.15;
+                            // (c) target already mapped
+                            let already_known =
+                                self.robot.known_map.cells[t.row as usize][t.col as usize]
+                                    != KnownCell::Unknown;
+                            close || already_known
                         }
                     };
                     if needs_refresh {
-                        self.wander_target =
-                            FrontierFinder::nearest_unknown(
-                                self.robot.position,
-                                &self.robot.known_map,
-                            )
-                            .map(|w| GridPos::from(w));
+                        let unk = FrontierFinder::nearest_unknown(
+                            self.robot.position,
+                            &self.robot.known_map,
+                        );
+                        if unk.is_none() {
+                            // No reachable Unknown passage cells remain.
+                            // Mark exploration complete so the next tick
+                            // switches to direct blind_goal navigation.
+                            self.exploration_complete = true;
+                        }
+                        self.wander_target = unk.map(|w| GridPos::from(w));
                     }
-                    self.wander_target.and_then(|target| {
+                    let path_opt = self.wander_target.and_then(|target| {
                         Planner::plan(self.robot.position, target, &self.robot.known_map)
-                    })
+                    });
+                    // (d) If A* returns None for the current target (confirmed
+                    //     unreachable), invalidate it immediately so the next tick
+                    //     picks a fresh nearest-Unknown instead of looping forever.
+                    if path_opt.is_none() {
+                        self.wander_target = None;
+                    }
+                    path_opt
                 })
+                .or_else(|| {
+                    // Post-exploration fallback: all reachable Unknown cells are
+                    // exhausted (frontier BFS and nearest_unknown both returned
+                    // None).  The robot has mapped the entire accessible maze via
+                    // LRF but may not have physically passed through blind_goal
+                    // (long-range scans reveal cells without travelling to them).
+                    // Navigate directly to blind_goal so the arrival check can
+                    // fire.  The exploration phase was entirely goal-unaware;
+                    // this is purely a completion step.
+                    Planner::plan(
+                        self.robot.position,
+                        self.maze.blind_goal,
+                        &self.robot.known_map,
+                    )
+                })
+            }
         };
 
         // 4. Move robot.
