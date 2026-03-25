@@ -89,6 +89,68 @@ impl FrontierFinder {
 
         None
     }
+
+    /// Find the nearest Unknown logical cell reachable from `robot_pos`,
+    /// treating Unknown connector cells as passable (optimistic BFS).
+    ///
+    /// Used as a fallback in Blind mode when no frontier exists yet (e.g. the
+    /// robot's first tick where the LRF has fully revealed its immediate area
+    /// but not yet reached any passage boundary with Unknown neighbours).
+    /// Returns `None` when all reachable logical cells are already mapped.
+    pub fn nearest_unknown(robot_pos: WorldPos, known_map: &KnownMap) -> Option<WorldPos> {
+        let phys = GridPos::from(robot_pos).snap_even();
+        let start_lc = (phys.col as usize / 2).min(LCOLS - 1);
+        let start_lr = (phys.row as usize / 2).min(LROWS - 1);
+
+        let mut visited = vec![vec![false; LCOLS]; LROWS];
+        let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
+
+        // Seed from robot's snapped logical cell and its immediate neighbours.
+        for dlc in -1i32..=1 {
+            for dlr in -1i32..=1 {
+                let lc = start_lc as i32 + dlc;
+                let lr = start_lr as i32 + dlr;
+                if lc < 0 || lr < 0 || lc >= LCOLS as i32 || lr >= LROWS as i32 {
+                    continue;
+                }
+                let lc = lc as usize;
+                let lr = lr as usize;
+                if !visited[lr][lc] {
+                    visited[lr][lc] = true;
+                    queue.push_back((lc, lr));
+                }
+            }
+        }
+
+        while let Some((lc, lr)) = queue.pop_front() {
+            let pc = lc * 2;
+            let pr = lr * 2;
+            // If this logical cell is Unknown it is unexplored territory:
+            // navigate here to open up new frontiers.
+            if known_map.cells[pr][pc] == KnownCell::Unknown {
+                return Some(WorldPos::from(GridPos {
+                    col: pc as u16,
+                    row: pr as u16,
+                }));
+            }
+            // Expand to logical neighbours through any non-confirmed-Wall connector.
+            // Unknown connectors are treated as passable (optimistic).
+            for (nlc, nlr) in logical_neighbors(lc, lr) {
+                if visited[nlr][nlc] {
+                    continue;
+                }
+                let wall_c = lc + nlc;
+                let wall_r = lr + nlr;
+                if known_map.cells[wall_r][wall_c] == KnownCell::Wall {
+                    continue;
+                }
+                visited[nlr][nlc] = true;
+                queue.push_back((nlc, nlr));
+            }
+        }
+
+        None
+    }
 }
 
 /// A logical cell is a frontier when any of the 4 physical cardinal neighbours

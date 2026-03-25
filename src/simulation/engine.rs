@@ -24,6 +24,10 @@ pub struct SimulationState {
     /// When `false` (blind mode) the robot uses frontier exploration only and
     /// reaches the goal only if it happens to pass through it.
     pub goal_known_to_robot: bool,
+    /// Persistent exploration target used in Blind mode when no frontier is
+    /// reachable.  Held across ticks until the robot arrives (avoids
+    /// oscillation from picking a new nearest-Unknown cell every tick).
+    wander_target: Option<GridPos>,
 }
 
 impl SimulationState {
@@ -52,6 +56,7 @@ impl SimulationState {
             elapsed_ms: 0,
             seed: actual_seed,
             goal_known_to_robot: true, // default: goal-aware mode
+            wander_target: None,
         }
     }
 
@@ -124,14 +129,13 @@ impl SimulationState {
             }
         } else {
             // --- Blind mode ---
-            // The robot does not know where the goal is. It explores using
-            // frontier BFS. When FrontierFinder finds no frontier (e.g. the
-            // very first tick before any Unknown/FreeSpace boundary is
-            // reachable, or after all reachable frontiers are exhausted), fall
-            // back to navigating toward blind_goal through the optimistic map
-            // (Unknown cells are treated as passable). This ensures the robot
-            // always moves and will eventually uncover new frontiers as it
-            // travels into unseen corridors.
+            // The robot does not know where the goal is.  It explores purely
+            // using frontier BFS.  When no frontier is reachable, fall back to
+            // a *persistent* wander target (nearest Unknown cell) that is held
+            // across ticks and only refreshed once the robot arrives.  This
+            // prevents oscillation caused by re-picking the nearest Unknown cell
+            // every tick (which would flip the robot's direction as the LRF
+            // reveals new cells each step).
             self.robot.state = RobotState::Exploring;
             FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
                 .and_then(|frontier| {
@@ -139,13 +143,28 @@ impl SimulationState {
                     Planner::plan(self.robot.position, gp, &self.robot.known_map)
                 })
                 .or_else(|| {
-                    // No frontier reachable -- drive toward blind_goal through
-                    // Unknown territory (optimistic A*).
-                    Planner::plan(
-                        self.robot.position,
-                        self.maze.blind_goal,
-                        &self.robot.known_map,
-                    )
+                    // Refresh wander_target only when None or robot has arrived
+                    // (within 3 cells = 0.15 m of the target).
+                    let needs_refresh = match self.wander_target {
+                        None => true,
+                        Some(t) => {
+                            let tw = WorldPos::from(t);
+                            let dx = tw.x - self.robot.position.x;
+                            let dy = tw.y - self.robot.position.y;
+                            (dx * dx + dy * dy).sqrt() < 0.15
+                        }
+                    };
+                    if needs_refresh {
+                        self.wander_target =
+                            FrontierFinder::nearest_unknown(
+                                self.robot.position,
+                                &self.robot.known_map,
+                            )
+                            .map(|w| GridPos::from(w));
+                    }
+                    self.wander_target.and_then(|target| {
+                        Planner::plan(self.robot.position, target, &self.robot.known_map)
+                    })
                 })
         };
 
