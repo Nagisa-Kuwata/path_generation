@@ -161,7 +161,13 @@ impl App for SimApp {
                     });
                 if ui.add(goal_aware_btn).clicked() {
                     self.goal_known_to_robot = true;
+                    // Always restart with the same seed so the robot is in Idle
+                    // state and the Start button is immediately available.
+                    let seed = self.sim.seed;
+                    self.sim = SimulationState::restart(Some(seed));
                     self.sim.goal_known_to_robot = true;
+                    self.last_tick = None;
+                    self.maze_tex = None;
                 }
                 let blind_btn = egui::Button::new("Blind")
                     .fill(if !self.goal_known_to_robot {
@@ -171,7 +177,13 @@ impl App for SimApp {
                     });
                 if ui.add(blind_btn).clicked() {
                     self.goal_known_to_robot = false;
+                    // Always restart with the same seed so the robot is in Idle
+                    // state and the Start button is immediately available.
+                    let seed = self.sim.seed;
+                    self.sim = SimulationState::restart(Some(seed));
                     self.sim.goal_known_to_robot = false;
+                    self.last_tick = None;
+                    self.maze_tex = None;
                 }
 
                 ui.separator();

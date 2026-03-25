@@ -125,13 +125,27 @@ impl SimulationState {
         } else {
             // --- Blind mode ---
             // The robot does not know where the goal is. It explores using
-            // frontier BFS only. `Arrived` is triggered by controller.rs when
-            // the robot physically reaches the goal position.
+            // frontier BFS. When FrontierFinder finds no frontier (e.g. the
+            // very first tick before any Unknown/FreeSpace boundary is
+            // reachable, or after all reachable frontiers are exhausted), fall
+            // back to navigating toward blind_goal through the optimistic map
+            // (Unknown cells are treated as passable). This ensures the robot
+            // always moves and will eventually uncover new frontiers as it
+            // travels into unseen corridors.
             self.robot.state = RobotState::Exploring;
             FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
                 .and_then(|frontier| {
                     let gp = GridPos::from(frontier);
                     Planner::plan(self.robot.position, gp, &self.robot.known_map)
+                })
+                .or_else(|| {
+                    // No frontier reachable -- drive toward blind_goal through
+                    // Unknown territory (optimistic A*).
+                    Planner::plan(
+                        self.robot.position,
+                        self.maze.blind_goal,
+                        &self.robot.known_map,
+                    )
                 })
         };
 

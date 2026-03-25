@@ -248,3 +248,207 @@ fn start_transitions_state_to_exploring() {
     sim.start();
     assert_eq!(sim.robot.state, RobotState::Exploring);
 }
+
+// Diagnostic: confirm Blind mode robot actually moves.
+// Run with: cargo test --test simulation_test diag_blind_mode -- --nocapture
+#[test]
+fn diag_blind_mode() {
+    for seed in [0u64, 42, 999] {
+        let mut sim = SimulationState::restart(Some(seed));
+        sim.goal_known_to_robot = false; // Blind mode
+        sim.start();
+        let start_pos = sim.robot.position;
+        println!(
+            "seed={seed} blind_goal=({},{}) start=({},{})",
+            sim.maze.blind_goal.col,
+            sim.maze.blind_goal.row,
+            sim.maze.start.col,
+            sim.maze.start.row
+        );
+        let mut moved = false;
+        for tick in 0..200usize {
+            sim.tick(20);
+            let dx = sim.robot.position.x - start_pos.x;
+            let dy = sim.robot.position.y - start_pos.y;
+            if (dx * dx + dy * dy).sqrt() > 0.001 {
+                println!("seed={seed} moved at tick={tick} pos=({:.3},{:.3}) state={:?}",
+                    sim.robot.position.x, sim.robot.position.y, sim.robot.state);
+                moved = true;
+                break;
+            }
+        }
+        if !moved {
+            println!("seed={seed} DID NOT MOVE after 200 ticks. state={:?}", sim.robot.state);
+        }
+        assert!(moved, "seed={seed}: robot should move in Blind mode");
+    }
+}
+
+// Diagnostic: Blind mode long-run - confirm robot reaches blind_goal.
+// cargo test --test simulation_test diag_blind_mode_long -- --nocapture
+#[test]
+fn diag_blind_mode_long() {
+    for seed in [0u64, 42, 999] {
+        let mut sim = SimulationState::restart(Some(seed));
+        sim.goal_known_to_robot = false;
+        sim.start();
+        println!(
+            "seed={seed} blind_goal=({},{}) start=({},{})",
+            sim.maze.blind_goal.col, sim.maze.blind_goal.row,
+            sim.maze.start.col, sim.maze.start.row,
+        );
+        let mut arrived = false;
+        let mut last_pos = sim.robot.position;
+        let mut stuck = 0u32;
+        for tick in 0..30_000usize {
+            sim.tick(20);
+            let dx = sim.robot.position.x - last_pos.x;
+            let dy = sim.robot.position.y - last_pos.y;
+            if (dx*dx+dy*dy).sqrt() < 1e-4 { stuck += 1; } else { stuck = 0; }
+            last_pos = sim.robot.position;
+            if stuck >= 50 {
+                let gp: GridPos = sim.robot.position.into();
+                println!("seed={seed} STUCK at tick={tick} pos=({:.3},{:.3}) cell=({},{}) state={:?}",
+                    sim.robot.position.x, sim.robot.position.y, gp.col, gp.row, sim.robot.state);
+                match &sim.robot.current_path {
+                    None => println!("  path=None"),
+                    Some(p) => println!("  path len={}", p.waypoints.len()),
+                }
+                break;
+            }
+            if sim.robot.state == RobotState::Arrived {
+                println!("seed={seed} ARRIVED at tick={tick}");
+                arrived = true;
+                break;
+            }
+            if tick % 5000 == 4999 {
+                let free = sim.robot.known_map.cells.iter().flat_map(|r|r.iter())
+                    .filter(|&&c|c==KnownCell::FreeSpace).count();
+                let gp: GridPos = sim.robot.position.into();
+                println!("seed={seed} tick={} pos=({},{}) free={free} state={:?}",
+                    tick+1, gp.col, gp.row, sim.robot.state);
+            }
+        }
+        if !arrived {
+            println!("seed={seed} did NOT arrive after 30000 ticks");
+        }
+        assert!(arrived, "seed={seed}: Blind mode robot should reach blind_goal");
+    }
+}
+
+// Diagnostic: switch to Blind mode after running in Goal-Aware mode.
+// Simulates user pressing Blind button mid-run.
+// cargo test --test simulation_test diag_blind_mode_switch -- --nocapture
+#[test]
+fn diag_blind_mode_switch() {
+    for seed in [0u64, 42, 999] {
+        let mut sim = SimulationState::restart(Some(seed));
+        // Start in Goal-Aware mode (default).
+        sim.start();
+        // Run 50 ticks in Goal-Aware mode.
+        for _ in 0..50 { sim.tick(20); }
+        let pos_before = sim.robot.position;
+        // Switch to Blind mode mid-run.
+        sim.goal_known_to_robot = false;
+        // Robot should continue moving.
+        let mut moved = false;
+        for tick in 0..200usize {
+            sim.tick(20);
+            let dx = sim.robot.position.x - pos_before.x;
+            let dy = sim.robot.position.y - pos_before.y;
+            if (dx*dx+dy*dy).sqrt() > 0.001 {
+                println!("seed={seed} moved after mode-switch at tick={tick} state={:?}", sim.robot.state);
+                moved = true;
+                break;
+            }
+        }
+        assert!(moved, "seed={seed}: robot should move after switching to Blind mid-run");
+    }
+}
+
+// Diagnostic: inspect known_map and BFS frontier after first scan.
+// Run with: cargo test --test simulation_test diag_frontier_internals -- --nocapture
+#[test]
+fn diag_frontier_internals() {
+    use path_generation::maze::GRID_SIZE;
+    let mut sim = SimulationState::restart(Some(0));
+    sim.start();
+    // Run one tick so the map is populated by the first scan
+    sim.tick(20);
+
+    let km = &sim.robot.known_map;
+    let free_count = km.cells.iter().flat_map(|r| r.iter()).filter(|&&c| c == KnownCell::FreeSpace).count();
+    let wall_count = km.cells.iter().flat_map(|r| r.iter()).filter(|&&c| c == KnownCell::Wall).count();
+    let unk_count  = km.cells.iter().flat_map(|r| r.iter()).filter(|&&c| c == KnownCell::Unknown).count();
+    println!("After 1 tick: free={free_count} wall={wall_count} unknown={unk_count} total={}", GRID_SIZE*GRID_SIZE);
+
+    // Count / print frontier candidates (even-indexed physical cells that are FreeSpace
+    // and have at least one Unknown cardinal physical neighbor, that are NOT the start cell).
+    let start_lc = 60usize; let start_lr = 60usize;
+    let mut frontier_cells: Vec<(usize, usize)> = Vec::new();
+    for lr in 0..120usize {
+        for lc in 0..120usize {
+            let pc = lc * 2;
+            let pr = lr * 2;
+            if km.cells[pr][pc] != KnownCell::FreeSpace { continue; }
+            if lc == start_lc && lr == start_lr { continue; }
+            // check cardinal physical neighbours for Unknown
+            let mut has_unknown = false;
+            for (dc, dr) in [(-1i32,0i32),(1,0),(0,-1),(0,1)] {
+                let nc = pc as i32 + dc;
+                let nr = pr as i32 + dr;
+                if nc >= 0 && nr >= 0 && nc < GRID_SIZE as i32 && nr < GRID_SIZE as i32 {
+                    if km.cells[nr as usize][nc as usize] == KnownCell::Unknown {
+                        has_unknown = true; break;
+                    }
+                }
+            }
+            if has_unknown { frontier_cells.push((lc, lr)); }
+        }
+    }
+    println!("Frontier candidate cells (FreeSpace + Unknown neighbor, not start): {}", frontier_cells.len());
+    for &(lc, lr) in frontier_cells.iter().take(10) {
+        println!("  logical ({lc},{lr}) physical ({},{})", lc*2, lr*2);
+    }
+
+    // Check whether any frontier is BFS-reachable from the start using robot's known map.
+    // Do a simple BFS from (60,60) following non-Wall connectors.
+    let mut bfs_visited = vec![vec![false; 120]; 120];
+    let mut bfs_q: std::collections::VecDeque<(usize,usize)> = std::collections::VecDeque::new();
+    for dlc in -1i32..=1 {
+        for dlr in -1i32..=1 {
+            let lc = 60i32 + dlc; let lr = 60i32 + dlr;
+            if lc >= 0 && lr >= 0 && lc < 120 && lr < 120 {
+                let (lc, lr) = (lc as usize, lr as usize);
+                if !bfs_visited[lr][lc] { bfs_visited[lr][lc] = true; bfs_q.push_back((lc,lr)); }
+            }
+        }
+    }
+    let mut bfs_cell_count = 0usize;
+    let mut bfs_frontier_count = 0usize;
+    while let Some((lc, lr)) = bfs_q.pop_front() {
+        bfs_cell_count += 1;
+        // Can this cell be a frontier?
+        let pc = lc * 2; let pr = lr * 2;
+        if km.cells[pr][pc] == KnownCell::FreeSpace && frontier_cells.contains(&(lc,lr)) {
+            bfs_frontier_count += 1;
+        }
+        // Expand
+        for (nlc, nlr) in [(lc.wrapping_sub(1),lr),(lc+1,lr),(lc,lr.wrapping_sub(1)),(lc,lr+1)] {
+            if nlc >= 120 || nlr >= 120 { continue; }
+            if bfs_visited[nlr][nlc] { continue; }
+            let npc = nlc * 2; let npr = nlr * 2;
+            if km.cells[npr][npc] == KnownCell::Wall { continue; }
+            let wall_c = lc + nlc; let wall_r = lr + nlr;
+            if km.cells[wall_r][wall_c] == KnownCell::Wall { continue; }
+            bfs_visited[nlr][nlc] = true;
+            bfs_q.push_back((nlc, nlr));
+        }
+    }
+    println!("BFS from start: visited {bfs_cell_count} cells, found {bfs_frontier_count} frontier cells reachable");
+    // NOTE: After just 1 scan from the robot's starting position, frontier_count = 0 is
+    // expected in tight corridors -- the LRF marks all physically adjacent cells Known
+    // (FreeSpace or Wall) so no Unknown neighbors remain adjacent to any FreeSpace cell.
+    // The engine handles this via the blind_goal fallback in the Blind-mode path planner.
+    println!("(0 frontiers after 1 scan is expected; blind mode uses fallback A* to get moving)");
+}
