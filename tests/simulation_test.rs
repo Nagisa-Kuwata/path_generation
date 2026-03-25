@@ -1,5 +1,6 @@
 // T019, T031: simulation restart and tick integration tests
 use path_generation::maze::types::{GRID_SIZE, GridPos};
+use path_generation::planner::{FrontierFinder, Planner};
 use path_generation::robot::types::{KnownCell, RobotState};
 use path_generation::simulation::SimulationState;
 
@@ -455,4 +456,192 @@ fn diag_frontier_internals() {
     // (FreeSpace or Wall) so no Unknown neighbors remain adjacent to any FreeSpace cell.
     // The engine handles this via the blind_goal fallback in the Blind-mode path planner.
     println!("(0 frontiers after 1 scan is expected; blind mode uses fallback A* to get moving)");
+}
+
+// Diagnostic: debug blind-mode freeze for a specific seed.
+// cargo test --release --test simulation_test diag_blind_freeze_seed -- --nocapture
+#[test]
+fn diag_blind_freeze_seed() {
+    const SEED: u64 = 1568540015947530764;
+    const MAX_TICKS: usize = 500_000; // ~10000 s at 20 ms/tick
+    const STUCK_WINDOW: u32 = 200;    // ~4 s of no movement
+    const REPORT_EVERY: usize = 10_000;
+
+    let mut sim = SimulationState::restart(Some(SEED));
+    sim.goal_known_to_robot = false;
+    sim.start();
+
+    println!("seed={SEED}");
+    println!("  blind_goal=({},{})", sim.maze.blind_goal.col, sim.maze.blind_goal.row);
+    println!("  start=({},{})", sim.maze.start.col, sim.maze.start.row);
+
+    let mut last_pos = sim.robot.position;
+    let mut stuck_ticks = 0u32;
+    let mut arrived = false;
+
+    for tick in 0..MAX_TICKS {
+        sim.tick(20);
+
+        let dx = sim.robot.position.x - last_pos.x;
+        let dy = sim.robot.position.y - last_pos.y;
+        if (dx * dx + dy * dy).sqrt() < 1e-4 {
+            stuck_ticks += 1;
+        } else {
+            stuck_ticks = 0;
+        }
+        last_pos = sim.robot.position;
+
+        if sim.robot.state == RobotState::Arrived {
+            let elapsed_s = (tick + 1) * 20 / 1000;
+            println!("  ARRIVED at tick={tick} (~{elapsed_s} s)");
+            arrived = true;
+            break;
+        }
+
+        if stuck_ticks >= STUCK_WINDOW {
+            let elapsed_s = (tick + 1) * 20 / 1000;
+            let gp: GridPos = sim.robot.position.into();
+            let free = sim.robot.known_map.cells.iter()
+                .flat_map(|r| r.iter())
+                .filter(|&&c| c == KnownCell::FreeSpace)
+                .count();
+            println!(
+                "  STUCK at tick={tick} (~{elapsed_s} s)  pos=({:.3},{:.3}) cell=({},{})  \
+                 free={free}/{total}  state={:?}",
+                sim.robot.position.x, sim.robot.position.y,
+                gp.col, gp.row, sim.robot.state,
+                total = GRID_SIZE * GRID_SIZE,
+            );
+            // Show current path info.
+            match &sim.robot.current_path {
+                None => println!("  path=None"),
+                Some(p) => {
+                    println!("  path: {} waypoints  is_frontier={}", p.waypoints.len(), p.is_to_frontier);
+                    for (i, wp) in p.waypoints.iter().take(4).enumerate() {
+                        let wgp: GridPos = (*wp).into();
+                        let known = sim.robot.known_map.cells[wgp.row as usize][wgp.col as usize];
+                        println!("    wp[{i}] ({:.3},{:.3}) grid=({},{}) known={known:?}", wp.x, wp.y, wgp.col, wgp.row);
+                    }
+                }
+            }
+            // Show known-map around robot.
+            let rc = gp.col as i32;
+            let rr = gp.row as i32;
+            println!("  known-map 7x7 around robot (col {} to {}, row {} to {}):",
+                rc - 3, rc + 3, rr - 3, rr + 3);
+            for dr in -3i32..=3 {
+                let mut row_s = String::new();
+                for dc in -3i32..=3 {
+                    let c = (rc + dc).clamp(0, GRID_SIZE as i32 - 1) as usize;
+                    let r = (rr + dr).clamp(0, GRID_SIZE as i32 - 1) as usize;
+                    let mark = if dc == 0 && dr == 0 { 'R' } else {
+                        match sim.robot.known_map.cells[r][c] {
+                            KnownCell::Unknown  => '?',
+                            KnownCell::FreeSpace => '.',
+                            KnownCell::Wall     => '#',
+                        }
+                    };
+                    row_s.push(mark);
+                    row_s.push(' ');
+                }
+                println!("    {row_s}");
+            }
+
+            // --- Deep diagnostic: count globally + locally reachable Unknown logical cells ---
+            // Count all Unknown logical cells in the entire map.
+            let mut global_unknown_logical = 0usize;
+            let mut global_free_logical = 0usize;
+            for lr in 0..120usize {
+                for lc in 0..120usize {
+                    match sim.robot.known_map.cells[lr * 2][lc * 2] {
+                        KnownCell::Unknown   => global_unknown_logical += 1,
+                        KnownCell::FreeSpace => global_free_logical += 1,
+                        KnownCell::Wall      => {}
+                    }
+                }
+            }
+            // BFS from robot (same logic as nearest_unknown) ? count reachable logical cells.
+            let snap_c = (gp.col as usize & !1).min(238);
+            let snap_r = (gp.row as usize & !1).min(238);
+            let start_lc = snap_c / 2;
+            let start_lr = snap_r / 2;
+            let mut bfs_vis = vec![vec![false; 120]; 120];
+            let mut bfs_queue: std::collections::VecDeque<(usize, usize)> = Default::default();
+            for dlc in -1i32..=1 {
+                for dlr in -1i32..=1 {
+                    let lc = start_lc as i32 + dlc;
+                    let lr = start_lr as i32 + dlr;
+                    if lc < 0 || lr < 0 || lc >= 120 || lr >= 120 { continue; }
+                    let (lc, lr) = (lc as usize, lr as usize);
+                    if !bfs_vis[lr][lc] { bfs_vis[lr][lc] = true; bfs_queue.push_back((lc, lr)); }
+                }
+            }
+            let mut reachable_unknown = 0usize;
+            let mut reachable_free   = 0usize;
+            let mut reachable_total  = 0usize;
+            while let Some((lc, lr)) = bfs_queue.pop_front() {
+                reachable_total += 1;
+                match sim.robot.known_map.cells[lr * 2][lc * 2] {
+                    KnownCell::Unknown   => reachable_unknown += 1,
+                    KnownCell::FreeSpace => reachable_free   += 1,
+                    KnownCell::Wall      => {}
+                }
+                for (nlc, nlr) in [(lc.wrapping_sub(1), lr), (lc + 1, lr),
+                                   (lc, lr.wrapping_sub(1)), (lc, lr + 1)] {
+                    if nlc >= 120 || nlr >= 120 || bfs_vis[nlr][nlc] { continue; }
+                    let wall_c = lc + nlc;
+                    let wall_r = lr + nlr;
+                    if sim.robot.known_map.cells[wall_r][wall_c] == KnownCell::Wall { continue; }
+                    bfs_vis[nlr][nlc] = true;
+                    bfs_queue.push_back((nlc, nlr));
+                }
+            }
+            println!(
+                "  logical-cell counts: globalUnknown={global_unknown_logical} \
+                 globalFree={global_free_logical}"
+            );
+            println!(
+                "  BFS from robot: reachable={reachable_total} \
+                 reachableUnknown={reachable_unknown} reachableFree={reachable_free}"
+            );
+            // Also check how many Unknown logical cells exist unreachable from robot.
+            let unreachable_unknown = global_unknown_logical - reachable_unknown;
+            println!("  unreachable Unknown logical cells: {unreachable_unknown}");
+
+            // --- Direct call to nearest_unknown and Planner ---
+            let robot_pos = sim.robot.position;
+            let nearest_unk = FrontierFinder::nearest_unknown(robot_pos, &sim.robot.known_map);
+            println!("  nearest_unknown={nearest_unk:?}");
+            if let Some(unk_world) = nearest_unk {
+                let unk_gp = GridPos::from(unk_world);
+                let plan_r = Planner::plan(robot_pos, unk_gp, &sim.robot.known_map);
+                println!("  plan(robot->nearest_unknown({},{})): {}",
+                    unk_gp.col, unk_gp.row,
+                    if plan_r.is_some() { "Some" } else { "None" });
+                if let Some(p) = &plan_r {
+                    println!("    waypoints={}", p.waypoints.len());
+                }
+            }
+            let nearest_fr = FrontierFinder::nearest_frontier(robot_pos, &sim.robot.known_map);
+            println!("  nearest_frontier={nearest_fr:?}");
+            break;
+        }
+
+        if tick % REPORT_EVERY == REPORT_EVERY - 1 {
+            let elapsed_s = (tick + 1) * 20 / 1000;
+            let gp: GridPos = sim.robot.position.into();
+            let free = sim.robot.known_map.cells.iter()
+                .flat_map(|r| r.iter())
+                .filter(|&&c| c == KnownCell::FreeSpace)
+                .count();
+            println!(
+                "  tick={tick} (~{elapsed_s} s)  pos=({},{})  free={free}  state={:?}",
+                gp.col, gp.row, sim.robot.state,
+            );
+        }
+    }
+
+    if !arrived && stuck_ticks < STUCK_WINDOW {
+        println!("  still running after {MAX_TICKS} ticks -- not stuck, not arrived");
+    }
 }

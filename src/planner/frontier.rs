@@ -105,22 +105,19 @@ impl FrontierFinder {
         let mut visited = vec![vec![false; LCOLS]; LROWS];
         let mut queue: VecDeque<(usize, usize)> = VecDeque::new();
 
-        // Seed from robot's snapped logical cell and its immediate neighbours.
-        for dlc in -1i32..=1 {
-            for dlr in -1i32..=1 {
-                let lc = start_lc as i32 + dlc;
-                let lr = start_lr as i32 + dlr;
-                if lc < 0 || lr < 0 || lc >= LCOLS as i32 || lr >= LROWS as i32 {
-                    continue;
-                }
-                let lc = lc as usize;
-                let lr = lr as usize;
-                if !visited[lr][lc] {
-                    visited[lr][lc] = true;
-                    queue.push_back((lc, lr));
-                }
-            }
-        }
+        // Seed only the snapped cell itself, then expand via passable connectors.
+        //
+        // IMPORTANT: do NOT use a 3x3 neighbourhood seed here.  A 3x3 seed
+        // adds logical cells (e.g. lc = LCOLS-1 border cells) without first
+        // verifying that a passable connector links them to the robot's
+        // position.  Those border cells are often Unknown (not yet scanned)
+        // but completely unreachable by A*, so returning one as the wander
+        // target causes A* to fail every tick and the robot to freeze.
+        // Starting from a single snapped cell and expanding only through
+        // verified-passable connectors guarantees that whatever cell the BFS
+        // returns is also reachable by the A* planner.
+        visited[start_lr][start_lc] = true;
+        queue.push_back((start_lc, start_lr));
 
         while let Some((lc, lr)) = queue.pop_front() {
             let pc = lc * 2;
