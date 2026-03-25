@@ -148,4 +148,89 @@ impl Lrf {
             timestamp_ms: 0,
         }
     }
+
+    /// Check whether `target` is directly visible from `from` via a single
+    /// straight-line LRF ray (no wall obstruction, within `MAX_RANGE_M`).
+    ///
+    /// Uses the same DDA algorithm as [`scan`].  Returns `false` immediately
+    /// if the Euclidean distance from `from` to `target` exceeds 5 m.
+    pub fn can_see(from: WorldPos, target: WorldPos, maze: &Maze) -> bool {
+        let world_dx = target.x - from.x;
+        let world_dy = target.y - from.y;
+        let world_dist = (world_dx * world_dx + world_dy * world_dy).sqrt();
+
+        if world_dist < 1e-7 {
+            return true; // effectively the same position
+        }
+        if world_dist > MAX_RANGE_M {
+            return false; // beyond LRF maximum range
+        }
+
+        let total_cells = world_dist / CELL_SIZE;
+        let wdx = world_dx / world_dist;
+        let wdy = world_dy / world_dist;
+        // Grid-space direction: col follows X, row follows -Y (Y-down grid).
+        let gdx = wdx;
+        let gdy = -wdy;
+
+        let rx = from.x / CELL_SIZE + 120.5;
+        let ry = 120.5 - from.y / CELL_SIZE;
+
+        let target_gp = GridPos::from(target);
+        let target_col = target_gp.col as i32;
+        let target_row = target_gp.row as i32;
+
+        let step_x: i32 = if gdx >= 0.0 { 1 } else { -1 };
+        let step_y: i32 = if gdy >= 0.0 { 1 } else { -1 };
+
+        let inv_x = if gdx.abs() < 1e-7 { f32::MAX } else { 1.0 / gdx.abs() };
+        let inv_y = if gdy.abs() < 1e-7 { f32::MAX } else { 1.0 / gdy.abs() };
+
+        let mut tmax_x = if gdx.abs() < 1e-7 {
+            f32::MAX
+        } else if gdx > 0.0 {
+            (rx.floor() + 1.0 - rx) * inv_x
+        } else {
+            (rx - rx.floor()) * inv_x
+        };
+        let mut tmax_y = if gdy.abs() < 1e-7 {
+            f32::MAX
+        } else if gdy > 0.0 {
+            (ry.floor() + 1.0 - ry) * inv_y
+        } else {
+            (ry - ry.floor()) * inv_y
+        };
+
+        let mut map_x = rx.floor() as i32;
+        let mut map_y = ry.floor() as i32;
+
+        loop {
+            if map_x < 0 || map_y < 0
+                || map_x >= GRID_SIZE as i32 || map_y >= GRID_SIZE as i32
+            {
+                return false;
+            }
+            // Reached the target cell without wall obstruction.
+            if map_x == target_col && map_y == target_row {
+                return true;
+            }
+            // A wall cell blocks the line of sight.
+            if maze.grid[map_y as usize][map_x as usize] == CellType::Wall {
+                return false;
+            }
+            let t_next = tmax_x.min(tmax_y);
+            // Ray advanced past expected distance ? target is visible.
+            if t_next > total_cells + 0.5 {
+                return true;
+            }
+            // Advance DDA.
+            if tmax_x <= tmax_y {
+                tmax_x += inv_x;
+                map_x += step_x;
+            } else {
+                tmax_y += inv_y;
+                map_y += step_y;
+            }
+        }
+    }
 }

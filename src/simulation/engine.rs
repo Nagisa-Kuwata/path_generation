@@ -136,33 +136,50 @@ impl SimulationState {
             }
         } else {
             // --- Blind mode ---
-            // The robot does not know where the goal is.  It explores purely
-            // using frontier BFS.  When no frontier is reachable, fall back to
-            // a *persistent* wander target (nearest Unknown cell) that is held
-            // across ticks and only refreshed once the robot arrives.  This
-            // prevents oscillation caused by re-picking the nearest Unknown cell
-            // every tick (which would flip the robot's direction as the LRF
-            // reveals new cells each step).
-            self.robot.state = RobotState::Exploring;
+            // The robot does not know where the goal is in advance.
+            //
+            // Priority 1 ? LRF visibility: if blind_goal is within the LRF
+            // range (?5 m) and the straight-line ray reaches it without hitting
+            // a wall, the robot has "spotted" the goal with its sensor and
+            // navigates directly to it, ending the exploration phase early.
+            //
+            // Priority 2 ? Post-exploration: once all reachable Unknown passage
+            // cells are exhausted (exploration_complete flag), navigate directly
+            // to blind_goal.  This handles the case where the goal was mapped
+            // remotely via LRF without the robot physically passing through it.
+            //
+            // Priority 3 ? Frontier exploration: normal BFS-based exploration
+            // with wander_target fallback.
+            let blind_goal_world = WorldPos::from(self.maze.blind_goal);
 
-            if self.exploration_complete {
+            if Lrf::can_see(self.robot.position, blind_goal_world, &self.maze) {
+                // Blind_goal is directly visible via LRF: navigate to it now.
+                self.robot.state = RobotState::NavigatingToGoal;
+                Planner::plan(
+                    self.robot.position,
+                    self.maze.blind_goal,
+                    &self.robot.known_map,
+                )
+            } else if self.exploration_complete {
                 // Post-exploration: all reachable Unknown passage cells are
                 // gone.  Navigate directly to blind_goal so the arrival check
                 // fires.  Some FreeSpace cells were mapped remotely via LRF
                 // without the robot physically passing through them; this step
                 // closes that gap.  The exploration phase was entirely
                 // goal-unaware; this is a completion step only.
+                self.robot.state = RobotState::Exploring;
                 Planner::plan(
                     self.robot.position,
                     self.maze.blind_goal,
                     &self.robot.known_map,
                 )
             } else {
+                self.robot.state = RobotState::Exploring;
                 FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
                     .and_then(|frontier| {
                         let gp = GridPos::from(frontier);
-                    Planner::plan(self.robot.position, gp, &self.robot.known_map)
-                })
+                        Planner::plan(self.robot.position, gp, &self.robot.known_map)
+                    })
                 .or_else(|| {
                     // Decide whether to refresh wander_target:
                     //  (a) None yet
