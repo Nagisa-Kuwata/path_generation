@@ -310,23 +310,30 @@ impl App for SimApp {
                     Stroke::new(2.0, orange),
                 );
             }
-            // Blind-mode goal: cyan diamond (always shown so the user can see it).
+            // Blind-mode goal: dark-blue filled circle (arrival threshold radius)
+            // + diamond outline, always shown regardless of mode.
             {
                 let bg = Self::grid_pos_to_screen(
                     origin,
                     self.sim.maze.blind_goal.col,
                     self.sim.maze.blind_goal.row,
                 );
-                let arm = SCALE * 2.0;
-                let cyan = Color32::from_rgb(0, 220, 220);
+                // ARRIVAL_THRESHOLD (0.05 m) == 1 cell == SCALE px.
+                // Use 2x for visibility.
+                let radius = SCALE * 2.0;
+                let dark_blue      = Color32::from_rgb(0, 60, 180);
+                let dark_blue_fill = Color32::from_rgba_premultiplied(0, 60, 180, 160);
+                painter.circle(bg, radius, dark_blue_fill, Stroke::new(1.5, dark_blue));
+                // Small diamond outline to distinguish from the robot body.
+                let arm = radius + SCALE;
                 let pts = vec![
-                    Pos2::new(bg.x, bg.y - arm),
-                    Pos2::new(bg.x + arm, bg.y),
-                    Pos2::new(bg.x, bg.y + arm),
-                    Pos2::new(bg.x - arm, bg.y),
-                    Pos2::new(bg.x, bg.y - arm),
+                    Pos2::new(bg.x,          bg.y - arm),
+                    Pos2::new(bg.x + arm,    bg.y),
+                    Pos2::new(bg.x,          bg.y + arm),
+                    Pos2::new(bg.x - arm,    bg.y),
+                    Pos2::new(bg.x,          bg.y - arm),
                 ];
-                painter.add(egui::Shape::line(pts, Stroke::new(2.0, cyan)));
+                painter.add(egui::Shape::line(pts, Stroke::new(1.5, dark_blue)));
             }
 
             // Layer 6: Robot body rectangle.
