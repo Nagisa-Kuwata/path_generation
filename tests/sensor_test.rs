@@ -136,31 +136,28 @@ fn update_map_does_not_overwrite_existing_entries() {
     assert_eq!(robot.known_map.cells[120][120], KnownCell::Wall);
 }
 
-// --- Lrf::can_see tests ---
+// --- LrfScan::detects_cell tests ---
 
 /// The robot can see its own position (zero distance).
 #[test]
-fn can_see_same_position_returns_true() {
-    let (maze, _) = make_maze_and_scan();
-    let pos = WorldPos { x: 0.0, y: 0.0 };
-    assert!(Lrf::can_see(pos, pos, &maze));
+fn scan_detects_same_position_returns_true() {
+    let (_, scan) = make_maze_and_scan();
+    let pos = GridPos { col: 120, row: 120 };
+    assert!(scan.detects_cell(pos));
 }
 
 /// A target within the same grid cell as the robot is always visible.
 #[test]
-fn can_see_same_cell_target_is_visible() {
-    let (maze, _) = make_maze_and_scan();
-    let from   = WorldPos { x: 0.0, y: 0.0 };
-    // Shift 0.4 cells to the right ? still inside the same grid cell (col 120).
-    let target = WorldPos { x: CELL_SIZE * 0.4, y: 0.0 };
-    assert!(Lrf::can_see(from, target, &maze));
+fn scan_detects_same_cell_target_is_visible() {
+    let (_, scan) = make_maze_and_scan();
+    assert!(scan.detects_cell(GridPos { col: 120, row: 120 }));
 }
 
 /// A passage cell directly connected to the robot (no wall in between) is visible.
 #[test]
-fn can_see_connected_passage_is_visible() {
+fn scan_detects_connected_passage_is_visible() {
     let maze = MazeGenerator::generate(42);
-    let from = WorldPos { x: 0.0, y: 0.0 };
+    let scan = Lrf::scan(WorldPos { x: 0.0, y: 0.0 }, &maze);
     // The center cell (120, 120) is always a passage.  Find the first cardinal
     // physical neighbour that is also a Passage (i.e. the wall between them was
     // carved by the DFS), then test visibility to the cell beyond it.
@@ -177,10 +174,9 @@ fn can_see_connected_passage_is_visible() {
             col: (120 + dc) as u16,
             row: (120 + dr) as u16,
         };
-        let target = WorldPos::from(target_gp);
         assert!(
-            Lrf::can_see(from, target, &maze),
-            "expected visibility to open neighbour ({},{})", target_gp.col, target_gp.row
+            scan.detects_cell(target_gp),
+            "expected scan detection for open neighbour ({},{})", target_gp.col, target_gp.row
         );
         found = true;
         break;
@@ -190,31 +186,27 @@ fn can_see_connected_passage_is_visible() {
 
 /// A target beyond MAX_RANGE_M (5 m) is never visible regardless of walls.
 #[test]
-fn can_see_beyond_max_range_returns_false() {
-    let (maze, _) = make_maze_and_scan();
-    let from   = WorldPos { x: 0.0, y: 0.0 };
-    let target = WorldPos { x: 6.0, y: 0.0 }; // 6 m > 5 m max range
-    assert!(!Lrf::can_see(from, target, &maze));
+fn scan_does_not_detect_beyond_max_range_cell() {
+    let (_, scan) = make_maze_and_scan();
+    assert!(!scan.detects_cell(GridPos { col: 0, row: 120 }));
 }
 
 /// blind_goal visibility from robot start position is consistent with
 /// whether a free-ray LRF ray at that angle reaches past that distance.
 #[test]
-fn can_see_blind_goal_matches_lrf_ray() {
+fn scan_blind_goal_detection_is_range_bounded() {
     let maze = MazeGenerator::generate(42);
-    let from  = WorldPos::from(maze.start);
-    let goal  = WorldPos::from(maze.blind_goal);
-    let visible = Lrf::can_see(from, goal, &maze);
+    let from = WorldPos::from(maze.start);
+    let scan = Lrf::scan(from, &maze);
+    let goal = WorldPos::from(maze.blind_goal);
+    let detected = scan.detects_cell(maze.blind_goal);
 
     let dx = goal.x - from.x;
     let dy = goal.y - from.y;
     let dist = (dx * dx + dy * dy).sqrt();
 
     if dist > 5.0 {
-        // Beyond range => must not be visible.
-        assert!(!visible, "target beyond range must not be visible");
+        assert!(!detected, "target beyond range must not be detected");
     }
-    // If within range the function returns a consistent answer.
-    // We do not assert a specific value because maze topology varies.
-    let _ = visible;
+    let _ = detected;
 }

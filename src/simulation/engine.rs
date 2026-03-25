@@ -150,16 +150,17 @@ impl SimulationState {
             //
             // Priority 3 ? Frontier exploration: normal BFS-based exploration
             // with wander_target fallback.
-            let blind_goal_world = WorldPos::from(self.maze.blind_goal);
-
-            if Lrf::can_see(self.robot.position, blind_goal_world, &self.maze) {
+            if self.lrf_scan.as_ref().is_some_and(|scan| scan.detects_cell(self.maze.blind_goal)) {
                 // Blind_goal is directly visible via LRF: navigate to it now.
-                self.robot.state = RobotState::NavigatingToGoal;
-                Planner::plan(
+                let direct = Planner::plan(
                     self.robot.position,
                     self.maze.blind_goal,
                     &self.robot.known_map,
-                )
+                );
+                if direct.is_some() {
+                    self.robot.state = RobotState::NavigatingToGoal;
+                }
+                direct
             } else if self.exploration_complete {
                 // Post-exploration: all reachable Unknown passage cells are
                 // gone.  Navigate directly to blind_goal so the arrival check
@@ -167,12 +168,15 @@ impl SimulationState {
                 // without the robot physically passing through them; this step
                 // closes that gap.  The exploration phase was entirely
                 // goal-unaware; this is a completion step only.
-                self.robot.state = RobotState::Exploring;
-                Planner::plan(
+                let direct = Planner::plan(
                     self.robot.position,
                     self.maze.blind_goal,
                     &self.robot.known_map,
-                )
+                );
+                if direct.is_some() {
+                    self.robot.state = RobotState::NavigatingToGoal;
+                }
+                direct
             } else {
                 self.robot.state = RobotState::Exploring;
                 FrontierFinder::nearest_frontier(self.robot.position, &self.robot.known_map)
@@ -233,11 +237,15 @@ impl SimulationState {
                     // Navigate directly to blind_goal so the arrival check can
                     // fire.  The exploration phase was entirely goal-unaware;
                     // this is purely a completion step.
-                    Planner::plan(
+                    let direct = Planner::plan(
                         self.robot.position,
                         self.maze.blind_goal,
                         &self.robot.known_map,
-                    )
+                    );
+                    if direct.is_some() {
+                        self.robot.state = RobotState::NavigatingToGoal;
+                    }
+                    direct
                 })
             }
         };
