@@ -189,7 +189,7 @@ impl App for SimApp {
                 ui.separator();
                 ui.label("Speed:");
                 ui.add(
-                    egui::Slider::new(&mut self.speed_multiplier, 1u8..=10)
+                    egui::Slider::new(&mut self.speed_multiplier, 1u8..=100)
                         .suffix("x")
                         .integer()
                 );
